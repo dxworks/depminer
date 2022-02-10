@@ -1,0 +1,48 @@
+on:
+  push:
+    tags:
+      - 'v*-voyager'
+
+name: Upload Release Asset
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Build
+        run: mvn clean install
+      - name: Prepare Assets
+        run: |
+          mkdir dependency-miner
+          mkdir dependency-miner/results
+          cp README.md dependency-miner/README.md
+          cp target/depmi.jar dependency-miner/depmi.jar
+          cp bin/depmi.sh dependency-miner/depmi.sh
+          cp bin/nomi.bat dependency-miner/depmi.bat
+          cp instrument.yml dependency-miner/instrument.yml
+          chmod +x dependency-miner/depmi.sh
+      - name: Create Archive
+        run: zip -r dependency-miner.zip dependency-miner
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Dependency Miner ${{ github.ref }} (Voyager)
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dependency-miner.zip
+          asset_name: dependency-miner-voyager.zip
+          asset_content_type: application/zip

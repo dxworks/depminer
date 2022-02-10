@@ -1,0 +1,10 @@
+name: Dependency Miner
+run: once
+
+results:
+  - dir: ${instrument}/results
+
+commands:
+  - name: Mine Dependencies
+    win: java -jar depmi.jar "${repo}"
+    unix: java -jar depmi.jar "${repo}"
