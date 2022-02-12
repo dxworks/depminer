@@ -23,7 +23,7 @@
     "depminer": "dist/depminer.js"
   },
   "scripts": {
-    "build": "npm run clean && mkdir dist && cp lib/*.js dist && cp target/jafax.jar dist",
+    "build": "npm run clean && mkdir dist && cp lib/*.js dist && cp target/depminer.jar dist",
     "clean": "rimraf dist/",
     "local": "npm run build && npm i"
   },
