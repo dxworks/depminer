@@ -1,0 +1,23 @@
+java:
+  - pom.xml
+  - build.gradle
+  - settings.gradle
+
+javascript:
+  - package.json
+  - package-lock.json
+  - yarn.lock
+
+php:
+  - composer.json
+  - composer.lock
+
+ruby:
+  - gemfile
+  - gemfile.lock
+  - .gemspec
+
+python:
+  - requirements.txt
+  - settings.py
+
