@@ -16,16 +16,14 @@ jobs:
         run: mvn clean install
       - name: Prepare Assets
         run: |
-          mkdir dependency-miner
-          mkdir dependency-miner/results
-          cp README.md dependency-miner/README.md
-          cp target/depmi.jar dependency-miner/depmi.jar
-          cp bin/depmi.sh dependency-miner/depmi.sh
-          cp bin/nomi.bat dependency-miner/depmi.bat
-          cp instrument.yml dependency-miner/instrument.yml
-          chmod +x dependency-miner/depmi.sh
+          mkdir depminer
+          mkdir depminer/results
+          cp README.md depminer/README.md
+          cp target/depminer.jar depminer/depminer.jar
+          cp instrument.yml depminer/instrument.yml
+          chmod +x depminer/depminer.sh
       - name: Create Archive
-        run: zip -r dependency-miner.zip dependency-miner
+        run: zip -r depminer.zip depminer
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -43,6 +41,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dependency-miner.zip
-          asset_name: dependency-miner-voyager.zip
+          asset_path: ./depminer.zip
+          asset_name: depminer-voyager.zip
           asset_content_type: application/zip

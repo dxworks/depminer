@@ -6,5 +6,5 @@ results:
 
 commands:
   - name: Mine Dependencies
-    win: java -jar depmi.jar "${repo}"
-    unix: java -jar depmi.jar "${repo}"
+    win: java -jar depmimer.jar "${repo}"
+    unix: java -jar depminer.jar "${repo}"

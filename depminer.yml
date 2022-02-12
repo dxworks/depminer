@@ -15,9 +15,17 @@ php:
 ruby:
   - gemfile
   - gemfile.lock
-  - .gemspec
+  - '*.gemspec'
+  - Rakefile
 
 python:
   - requirements.txt
-  - settings.py
+  - setup.py
 
+c#:
+  - '*.nupkg'
+
+#docker:
+#  - '*Dockerfile*'
+#  - '*docker-compose*.yml'
+#  - '*docker-compose*.yaml'
