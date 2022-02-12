@@ -11,7 +11,7 @@
     <properties>
         <kotlin.version>1.4.31</kotlin.version>
         <final.jar.name>depminer</final.jar.name>
-        <main.class>org.dxworks.dependencyminer.DepMiKt</main.class>
+        <main.class>org.dxworks.depminer.DepMiKt</main.class>
     </properties>
 
     <dependencies>

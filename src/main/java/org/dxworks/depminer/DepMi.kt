@@ -1,4 +1,4 @@
-package org.dxworks.dependencyminer
+package org.dxworks.depminer
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory

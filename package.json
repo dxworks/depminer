@@ -1,0 +1,51 @@
+{
+  "name": "@dxworks/depminer",
+  "version": "0.1.0",
+  "description": "Copies dependency files based on globs",
+  "keywords": [
+    "depinder",
+    "depminer",
+    "dependency-analysis",
+    "libraries"
+  ],
+  "homepage": "https://github.com/dxworks/depminer#readme",
+  "bugs": {
+    "url": "https://github.com/dxworks/depminer/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dxworks/depminer.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Mario Rivis",
+  "main": "dist/index.js",
+  "bin": {
+    "depminer": "dist/depminer.js"
+  },
+  "scripts": {
+    "build": "npm run clean && mkdir dist && cp lib/*.js dist && cp target/jafax.jar dist",
+    "clean": "rimraf dist/",
+    "local": "npm run build && npm i"
+  },
+  "dependencies": {
+    "commander": "^8.3.0",
+    "java-caller": "^2.4.0"
+  },
+  "devDependencies": {
+    "json": "^11.0.0",
+    "rimraf": "^3.0.2",
+    "sort-package-json": "^1.52.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dxw": {
+    "commands": [
+      {
+        "file": "dist/index.js",
+        "command": "depminerCommand"
+      }
+    ]
+  }
+}

@@ -4,3 +4,4 @@ target
 results/
 
 /reconstruction/
+node_modules
