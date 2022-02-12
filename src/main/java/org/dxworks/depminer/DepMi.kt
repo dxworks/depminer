@@ -24,16 +24,12 @@ val jsonMapper = jacksonObjectMapper()
 
 const val IGNORE_FILE = "ignore.file"
 const val DEPMINER_FILE = "depminer.file"
-const val DEPMINER_TARGET = "depminer.target"
-const val DEPMINER_RESULTS = "depminer.results"
 
 fun main(args: Array<String>) {
 
     val argumenthor = Argumenthor(ArgumenthorConfiguration(
         StringField(IGNORE_FILE, ".ignore.yml"),
         StringField(DEPMINER_FILE, "depminer.yml"),
-        StringField(DEPMINER_TARGET, null),
-        StringField(DEPMINER_RESULTS, "results")
     ).also {
         it.addSource(ArgsSource().also { it.args = args })
         it.addSource(EnvSource("depminer"))
@@ -44,22 +40,26 @@ fun main(args: Array<String>) {
     }
 
     val command = args.first()
+    if(command != "extract" && command != "construct") {
+        println("Please provide as a first argument the command you wish to run: extract or construct")
+        exitProcess(1)
+    }
 
     println("Starting DepMi (Dependency Miner)\n")
 
+    if (args.size > 3 || args.size < 2) {
+        println("$command command can get 2 parameters: the target folder to analyse (required) and the results folder to put the results in (by default 'results')")
+        exitProcess(1)
+    }
+    val targetPath = Paths.get(args[1])
+    if(!Files.exists(targetPath)) {
+        println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
+        exitProcess(1)
+    }
+    val depminerResultsPath = if (args.size == 3) Paths.get(args[2]) else Paths.get("results")
+
     when (command) {
         "extract" -> {
-            val target = argumenthor.getValue<String>(DEPMINER_TARGET)
-            if (target == null) {
-                println("Please specify the target folder: -depminerTarget=<path/to/taraget>")
-                exitProcess(1)
-            }
-
-            var targetPath = Paths.get(target)
-
-            val depminerResults = argumenthor.getValue<String>(DEPMINER_RESULTS)
-            var depminerResultsPath = Paths.get(depminerResults)
-
             if (Files.exists(depminerResultsPath)) {
                 depminerResultsPath.toFile().deleteRecursively()
             }
@@ -67,13 +67,6 @@ fun main(args: Array<String>) {
             extract(argumenthor, targetPath, depminerResultsPath)
         }
         "construct" -> {
-            if (args.size > 3 || args.size < 2) {
-                println("construct command can get 2 parameters: the target folder (containing the index.json) and the results folder to construct the folder to (by default the current working directory)")
-                exitProcess(1)
-            }
-            val targetPath = Paths.get(args[1])
-            val depminerResultsPath = if (args.size == 3) Paths.get(args[2]) else Paths.get(".")
-
             if (targetPath.toFile().absolutePath == depminerResultsPath.toFile().absolutePath) {
                 println("Target and Results folder cannot be the same!")
                 exitProcess(1)
@@ -100,10 +93,10 @@ private fun extract(
     depminerResultsPath: Path,
 ) {
 
-    val depminerFile = argumenthor.getValue<String>(DEPMINER_FILE).also { println("Reading $it") }
+    val depminerFile = argumenthor.getValue<String>(DEPMINER_FILE).also { println("Reading ${File(it).absolutePath}") }
     val languageMap: Map<String, List<String>> = yamlMapper.readValue(File(depminerFile))
     val fileNames = languageMap.values.toList().flatten()
-    val ignoreFile = argumenthor.getValue<String>(IGNORE_FILE).also { println("Ignoring all files from $it") }
+    val ignoreFile = argumenthor.getValue<String>(IGNORE_FILE).also { println("Ignoring all files from ${File(it).absolutePath}") }
     val blacklistedGlobs: ExcludedPaths = yamlMapper.readValue(File(ignoreFile))
 
     println("Reading Files...")
@@ -142,13 +135,7 @@ private fun extract(
     jacksonObjectMapper().writerWithDefaultPrettyPrinter()
         .writeValue(depminerResultsPath.resolve("index.json").toFile(), resultsMap)
 
-    println("\nDepMi (Dependency Miner) finished successfully! Please view your results in the ./results directory")
-}
-
-fun getFileSpecsContent(): Map<String, List<String>> {
-    val path = Paths.get("mining-specs.yml")
-
-    return yamlMapper.readValue(path.toFile())
+    println("\nDepMi (Dependency Miner) finished successfully! Please view your results at ${depminerResultsPath.toFile().absolutePath}")
 }
 
 class ExcludedPaths(
