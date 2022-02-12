@@ -21,6 +21,8 @@ jobs:
           cp README.md depminer/README.md
           cp target/depminer.jar depminer/depminer.jar
           cp instrument.yml depminer/instrument.yml
+          cp depminer.yml depminer/depminer.yml
+          cp .ignore.yml depminer/.ignore.yml
 
       - name: Create Archive
         run: zip -r depminer.zip depminer
