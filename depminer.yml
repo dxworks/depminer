@@ -22,8 +22,10 @@ python:
   - requirements.txt
   - setup.py
 
-c#:
+csharp:
   - '*.nupkg'
+  - '*.csproj'
+  - '*.sln'
 
 #docker:
 #  - '*Dockerfile*'
