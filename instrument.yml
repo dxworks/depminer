@@ -6,7 +6,7 @@ results:
 
 commands:
   - name: Mine Dependencies
-    win: java -jar depmimer.jar extract "${repo}" "${instrument}/results"
+    win: java -jar depminer.jar extract "${repo}" "${instrument}/results"
     unix: java -jar depminer.jar extract "${repo}" "${instrument}/results"
 
 environment:
