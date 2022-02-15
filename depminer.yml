@@ -22,9 +22,15 @@ python:
   - requirements.txt
   - setup.py
 
-csharp:
-  - '*.nupkg'
+dotnet:
+  - packages.config
+  - project.json
+  - project.lock.json
+  - project.assets.json
   - '*.csproj'
+  - '*.fsproj'
+  - '*.vbproj'
+  - '*.dcproj'
   - '*.sln'
 
 #docker:
