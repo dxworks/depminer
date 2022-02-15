@@ -21,6 +21,9 @@ ruby:
 python:
   - requirements.txt
   - setup.py
+  - setup.cfg
+  - pyproject.toml
+  - '*Pipfile*'
 
 dotnet:
   - packages.config
