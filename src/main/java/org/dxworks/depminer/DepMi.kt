@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.apache.commons.io.FileUtils
+import org.apache.commons.io.IOCase
 import org.apache.commons.io.filefilter.NotFileFilter
 import org.apache.commons.io.filefilter.WildcardFileFilter
 import org.dxworks.argumenthor.Argumenthor
@@ -103,7 +104,7 @@ private fun extract(
 
     val packageFiles =
         FileUtils.listFiles(
-            target.toFile(), WildcardFileFilter(fileNames).and(
+            target.toFile(), WildcardFileFilter(fileNames, IOCase.INSENSITIVE).and(
                 NotFileFilter(
                     WildcardFileFilter(
                         blacklistedGlobs.files.orEmpty()
@@ -122,12 +123,12 @@ private fun extract(
                 val newName =
                     "${file.nameWithoutExtension}-$index${file.extension.let { if (it.isNotEmpty()) ".$it" else "" }}"
                 file.copyTo(depminerResultsPath.resolve(newName).toFile())
-                resultsMap[newName] = file.relativeTo(target.toFile()).toString()
+                resultsMap[newName] = file.relativeTo(target.toFile()).normalize().toString()
             }
         } else {
             entry.value.firstOrNull()?.also {
                 it.copyTo(depminerResultsPath.resolve(it.name).toFile())
-                resultsMap[it.name] = it.relativeTo(target.toFile()).toString()
+                resultsMap[it.name] = it.relativeTo(target.toFile()).normalize().toString()
             }
         }
     }
