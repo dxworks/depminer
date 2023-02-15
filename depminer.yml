@@ -30,6 +30,7 @@ dotnet:
   - project.json
   - project.lock.json
   - project.assets.json
+  - Directory.Build.props
   - '*.csproj'
   - '*.fsproj'
   - '*.vbproj'
