@@ -117,7 +117,7 @@ private fun extract(
 
     println("Writing Results...")
 
-    packageFiles.groupBy { it.name }.forEach { entry ->
+    packageFiles.groupBy { it.name.lowercase() }.forEach { entry ->
         if (entry.value.size > 1) {
             entry.value.forEachIndexed { index, file: File ->
                 val newName =
