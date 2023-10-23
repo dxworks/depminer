@@ -39,25 +39,10 @@ jobs:
         env:
           TAG: ${{ github.ref }}
 
-      - name: Prepare Release Notes
-        run: touch ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Depminer ${{ steps.semver_parser.outputs.semver }}
-          body_path: ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
-          body: ""
-          prerelease: false
-          draft: false
-          fail_on_unmatched_files: true
-          files: depminer.zip
-
       - name: Setup Node
         uses: actions/setup-node@v2
         with:
-          node-version: '16.x'
+          node-version: '18.x'
           cache: 'npm'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@dxworks'
@@ -76,3 +61,31 @@ jobs:
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node with NPM Package Registry
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@dxworks'
+
+      - name: Publish on NPM
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Prepare Release Notes
+        run: touch ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Depminer ${{ steps.semver_parser.outputs.semver }}
+          body_path: ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
+          body: ""
+          prerelease: false
+          draft: false
+          fail_on_unmatched_files: true
+          files: depminer.zip
