@@ -2,6 +2,8 @@ java:
   - pom.xml
   - build.gradle
   - settings.gradle
+  - gradle.lockfile
+  - deptree.txt
 
 javascript:
   - package.json
