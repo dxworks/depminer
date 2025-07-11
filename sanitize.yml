@@ -1,0 +1,140 @@
+patterns:
+  # ── 1. Cloud-provider keys ───────────────────────────────
+  - pattern: "AKIA[0-9A-Z]{16}"
+    replacement: "***REDACTED***"
+
+  - pattern: "(?i)aws[_-]?secret[_-]?access[_-]?key.{0,3}[A-Za-z0-9/+=]{40}"
+    replacement: "***REDACTED***"
+
+  - pattern: "AIza[0-9A-Za-z_-]{35}"
+    replacement: "***REDACTED***"
+
+  - pattern: "DefaultEndpointsProtocol=https;AccountName=[A-Za-z0-9]{3,24};AccountKey=[A-Za-z0-9/+]{88}"
+    replacement: "DefaultEndpointsProtocol=https;AccountName=***REDACTED***;AccountKey=***REDACTED***"
+
+  # ── 2. Developer-platform tokens ─────────────────────────
+  - pattern: "\\bgh[pousr]_[A-Za-z0-9_]{36,251}\\b"
+    replacement: "***REDACTED***"
+
+  - pattern: "glpat-[A-Za-z0-9_-]{20}"
+    replacement: "***REDACTED***"
+
+  - pattern: "(?i)npm[_-]?token\\s*[:=]\\s*[A-Za-z0-9=_-]{20,}"
+    replacement: "NPM_TOKEN=***REDACTED***"
+
+  - pattern: "pypi-[A-Za-z0-9._]{50,}"
+    replacement: "***REDACTED***"
+
+  - pattern: "xox[baprs]-[0-9]{12}-[0-9]{12,13}-[0-9A-Za-z]{24}"
+    replacement: "***REDACTED***"
+
+  - pattern: "\\bsk-[A-Za-z0-9]{48}\\b"
+    replacement: "***REDACTED***"
+
+  - pattern: "\\bsk_live_[A-Za-z0-9]{24}\\b"
+    replacement: "***REDACTED***"
+
+  - pattern: "\\brk_live_[A-Za-z0-9]{24}\\b"
+    replacement: "***REDACTED***"
+
+  - pattern: "\\bSG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{22}"
+    replacement: "***REDACTED***"
+
+  - pattern: "AC[0-9a-f]{32}"
+    replacement: "***REDACTED***"
+
+  - pattern: "(?i)auth_token\\s*[:=]\\s*['\"]?[0-9a-f]{32}['\"]?"
+    replacement: "auth_token: \"***REDACTED***\""
+
+  - pattern: "hf_[A-Za-z0-9]{40,}"
+    replacement: "***REDACTED***"
+
+  - pattern: "claude-[a-zA-Z0-9_-]{40,}"
+    replacement: "***REDACTED***"
+
+  - pattern: "cohere-[a-zA-Z0-9_-]{40,}"
+    replacement: "***REDACTED***"
+
+  - pattern: "r8_[A-Za-z0-9]{32,}"
+    replacement: "***REDACTED***"
+
+  - pattern: "\\beyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\b"
+    replacement: "***REDACTED***"
+
+  # ── 3. URLs / connection strings ─────────────────────────
+  - pattern: "https?://[^:\\s]+:[^@\\s]+@"
+    replacement: "https://***REDACTED***@"
+
+  - pattern: "jdbc:[^\\s;]+(?:;[^\\s;]+)*"
+    replacement: "jdbc:***REDACTED***"
+
+  - pattern: "postgres(?:ql)?://[^:\\s]+:[^@\\s]+@[^:\\s]+:\\d+/[a-zA-Z0-9_-]+"
+    replacement: "postgres://***REDACTED***@"
+
+  - pattern: "mysql://[^:\\s]+:[^@\\s]+@[^:\\s]+(?::\\d+)?/[a-zA-Z0-9_-]+"
+    replacement: "mysql://***REDACTED***@"
+
+  - pattern: "(?i)(Server|Data Source)=[^;]+;(User Id|Uid)=[^;]+;(Password|Pwd)=[^;]+"
+    replacement: "$1=***REDACTED***;$2=***REDACTED***;$3=***REDACTED***"
+
+  - pattern: "mongodb(?:\\+srv)?://[^:\\s]+:[^@\\s]+@[^\\s]+"
+    replacement: "mongodb://***REDACTED***@"
+
+  - pattern: "jdbc:oracle:thin:[^/]+/[^@]+@[^:\\s]+:\\d+/[^\\s]+"
+    replacement: "jdbc:oracle:thin:***REDACTED***"
+
+  # ── 4. Generic assignments ───────────────────────────────
+  - pattern: "(?i)(password|passphrase|pwd|secret|token|key|jwt)\\s*[:=]\\s*['\"]?[A-Za-z0-9/+!@#$%^&*_~.-]{8,}['\"]?"
+    replacement: "$1: \"***REDACTED***\""
+
+  # ── 5. Personal info ─────────────────────────────────────
+  - pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b"
+    replacement: "email@redacted.com"
+
+  - pattern: "<url>https?://[^<]+</url>"
+    replacement: "<url>https://repository.redacted.com</url>"
+    
+  # ── 6. Package Registry Credentials ─────────────────────
+  - pattern: "(?i)registry\\.npmjs\\.org/:_authToken=[A-Za-z0-9-_]{40,}"
+    replacement: "registry.npmjs.org/:_authToken=***REDACTED***"
+
+  - pattern: "(?i)registry\\.yarnpkg\\.com/:_authToken=[A-Za-z0-9-_]{40,}"
+    replacement: "registry.yarnpkg.com/:_authToken=***REDACTED***"
+
+  - pattern: "(?i)artifactory_[a-z]+_(?:user|password|apikey)\\s*[:=]\\s*['\"]?[^'\",\\s]{8,}['\"]?"
+    replacement: "$1: \"***REDACTED***\""
+
+  # ── 7. Maven Repository Credentials ─────────────────────
+  - pattern: "<(username|password)>[^<]+</\\1>"
+    replacement: "<$1>***REDACTED***</$1>"
+
+  - pattern: "id=\"[^\"]+\"\\s*username=\"[^\"]+\"\\s*password=\"[^\"]+\""
+    replacement: "id=\"***REDACTED***\" username=\"***REDACTED***\" password=\"***REDACTED***\""
+
+  # ── 8. Gradle Properties ─────────────────────────────────
+  - pattern: "(?i)(sonatype|nexus|artifactory|repository)\\.(username|password)\\s*=\\s*[^\\s]+"
+    replacement: "$1.$2=***REDACTED***"
+
+  # ── 9. Python pip Configuration ─────────────────────────
+  - pattern: "(?i)index-url\\s*=\\s*https?://[^:]+:[^@]+@"
+    replacement: "index-url = https://***REDACTED***@"
+
+  # ── 10. Docker Registry Credentials ─────────────────────
+  - pattern: "\"auth\"\\s*:\\s*\"[A-Za-z0-9+/=]{20,}\""
+    replacement: "\"auth\": \"***REDACTED***\""
+
+  # ── 11. Environment Variables in Configuration Files ────
+  - pattern: "(?i)env:\\s*['\"]?(API_KEY|SECRET|TOKEN|PASSWORD)['\"]?\\s*:\\s*['\"]?[A-Za-z0-9_.-]{8,}['\"]?"
+    replacement: "env: \"$1\": \"***REDACTED***\""
+
+  # ── 12. Hardcoded Secrets in Build Scripts ───────────────
+  - pattern: "(?i)(?:set|export)\\s+(API_KEY|SECRET|TOKEN|PASSWORD)\\s*=\\s*['\"]?[A-Za-z0-9_.-]{8,}['\"]?"
+    replacement: "$1=***REDACTED***"
+
+  # ── 13. Certificate Thumbprints and Serial Numbers ──────
+  - pattern: "(?i)certificate[_\\-]?(thumbprint|serial)\\s*[:=]\\s*['\"]?[A-Fa-f0-9:]{40,}['\"]?"
+    replacement: "$1: \"***REDACTED***\""
+
+  # ── 14. Internal Hostnames and Domains ───────────────────
+  - pattern: "(?i)(host|server|domain)\\s*[:=]\\s*['\"]?([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}['\"]?"
+    replacement: "$1: \"internal-host.redacted.com\""
