@@ -2,11 +2,16 @@ java:
   - pom.xml
   - build.gradle
   - settings.gradle
+  - gradle.lockfile
+  - deptree.txt
+  - '*.sbt'
 
 javascript:
   - package.json
   - package-lock.json
   - yarn.lock
+  - pnpm-lock.yaml
+  - npm-shrinkwrap.json
 
 php:
   - composer.json
