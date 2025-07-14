@@ -22,6 +22,7 @@ jobs:
           cp target/depminer.jar depminer/depminer.jar
           cp instrument.yml depminer/instrument.yml
           cp depminer.yml depminer/depminer.yml
+          cp sanitize.yml depminer/sanitize.yml
           cp .ignore.yml depminer/.ignore.yml
 
       - name: Create Archive

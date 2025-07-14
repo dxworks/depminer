@@ -24,6 +24,7 @@ jobs:
           cp bin/depminer.sh depminer/depminer.sh
           cp bin/depminer.bat depminer/depminer.bat
           cp depminer.yml depminer/depminer.yml
+          cp sanitize.yml depminer/sanitize.yml
           cp .ignore.yml depminer/.ignore.yml
           chmod +x depminer/depminer.sh
 
