@@ -138,3 +138,7 @@ patterns:
   # ── 14. Internal Hostnames and Domains ───────────────────
   - pattern: "(?i)(host|server|domain)\\s*[:=]\\s*['\"]?([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}['\"]?"
     replacement: "$1: \"internal-host.redacted.com\""
+
+  # ── 15. Gradle Signing Configurations ─────────────────────
+  - pattern: "(storePassword|keyPassword|keyAlias)\\s+[\"']([^\"']+)[\"']"
+    replacement: "$1 \"***REDACTED***\""
