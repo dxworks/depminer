@@ -84,8 +84,8 @@ patterns:
     replacement: "jdbc:oracle:thin:***REDACTED***"
 
   # ── 4. Generic assignments ───────────────────────────────
-  - pattern: "(?i)(password|passphrase|pwd|secret|token|key|jwt)\\s*[:=]\\s*['\"]?[A-Za-z0-9/+!@#$%^&*_~.-]{8,}['\"]?"
-    replacement: "$1: \"***REDACTED***\""
+  - pattern: "(?i)(password|passphrase|pwd|secret|token|key|jwt)\\s*([:=])\\s*(['\"]?)[A-Za-z0-9/+!@#$%^&*_~.-]{8,}\\3"
+    replacement: "$1$2$3***REDACTED***$3"
 
   # ── 5. Personal info ─────────────────────────────────────
   - pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b"
