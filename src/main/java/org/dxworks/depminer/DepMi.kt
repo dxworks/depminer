@@ -21,7 +21,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.system.exitProcess
 
-val yamlMapper = ObjectMapper(YAMLFactory()).also { it.registerModule(KotlinModule()) }
+val yamlMapper = ObjectMapper(YAMLFactory()).also { it.registerModule(KotlinModule.Builder().build()) }
 val jsonMapper = jacksonObjectMapper()
 
 const val IGNORE_FILE = "ignore.file"
