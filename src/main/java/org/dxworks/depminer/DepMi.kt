@@ -5,6 +5,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOCase
 import org.apache.commons.io.filefilter.NotFileFilter
@@ -21,7 +22,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.system.exitProcess
 
-val yamlMapper = ObjectMapper(YAMLFactory()).also { it.registerModule(KotlinModule()) }
+val yamlMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 val jsonMapper = jacksonObjectMapper()
 
 const val IGNORE_FILE = "ignore.file"
