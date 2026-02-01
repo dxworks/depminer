@@ -100,7 +100,8 @@ fun main(args: Array<String>) {
 
 }
 
-private fun sanitizeByDefault(args: Array<String>): Boolean = !(args.size >= 4 && args[3].equals("no-sanitize", ignoreCase = true))
+private fun sanitizeByDefault(args: Array<String>): Boolean =
+    !(args.size >= 4 && args[3].equals("no-sanitize", ignoreCase = true))
 
 private fun extract(
     argumenthor: Argumenthor,
@@ -121,13 +122,16 @@ private fun extract(
 
     val packageFiles =
         FileUtils.listFiles(
-            target.toFile(), WildcardFileFilter(fileNames, IOCase.INSENSITIVE).and(
+            target.toFile(),
+            WildcardFileFilter.builder().setWildcards(fileNames).setIoCase(IOCase.INSENSITIVE).get().and(
                 NotFileFilter(
-                    WildcardFileFilter(
-                        blacklistedGlobs.files.orEmpty()
-                    )
+                    WildcardFileFilter.builder()
+                        .setWildcards(blacklistedGlobs.files.orEmpty())
+                        .setIoCase(IOCase.INSENSITIVE)
+                        .get()
                 )
-            ), NotFileFilter(WildcardFileFilter(blacklistedGlobs.dirs.orEmpty()))
+            ),
+            NotFileFilter(WildcardFileFilter.builder().setWildcards(blacklistedGlobs.dirs.orEmpty()).get())
         )
 
     val resultsMap = mutableMapOf<String, String>()
