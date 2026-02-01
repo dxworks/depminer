@@ -21,7 +21,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.system.exitProcess
 
-val yamlMapper = ObjectMapper(YAMLFactory()).also { it.registerModule(KotlinModule()) }
+val yamlMapper = ObjectMapper(YAMLFactory()).also { it.registerModule(KotlinModule.Builder().build()) }
 val jsonMapper = jacksonObjectMapper()
 
 const val IGNORE_FILE = "ignore.file"
@@ -61,7 +61,7 @@ fun main(args: Array<String>) {
         println("$command command requires at least 1 parameter: the target folder to analyse")
         exitProcess(1)
     }
-    
+
     val targetPath = Paths.get(args[1])
     if (!Files.exists(targetPath)) {
         println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
