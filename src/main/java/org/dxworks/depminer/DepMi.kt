@@ -2,7 +2,6 @@ package org.dxworks.depminer
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
-import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
@@ -62,7 +61,7 @@ fun main(args: Array<String>) {
         println("$command command requires at least 1 parameter: the target folder to analyse")
         exitProcess(1)
     }
-    
+
     val targetPath = Paths.get(args[1])
     if (!Files.exists(targetPath)) {
         println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
