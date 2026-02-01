@@ -12,7 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 11
       - name: Build
         run: mvn clean install
       - name: Prepare Assets
@@ -41,12 +46,10 @@ jobs:
           TAG: ${{ github.ref }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '18.x'
+          node-version: '24.x'
           cache: 'npm'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@dxworks'
 
       - name: Prepare Node App
         run: |
@@ -57,19 +60,6 @@ jobs:
           node_modules/.bin/json -I -f package.json -e "this.version='$VERSION'"
         env:
           VERSION: ${{ steps.semver_parser.outputs.semver }}
-
-      - name: Publish NPM
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Node with NPM Package Registry
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18.x'
-          cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
-          scope: '@dxworks'
 
       - name: Publish on NPM
         run: npm publish --access public
