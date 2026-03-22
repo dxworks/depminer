@@ -3,56 +3,45 @@ on:
     tags:
       - 'v*-voyager'
 
-name: Release Voyager
+name: Create Voyager Release
 
 jobs:
-  release:
-    name: Release
+  parse-tag:
     runs-on: ubuntu-latest
+    outputs:
+      semver: ${{ steps.parse.outputs.semver }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: 11
-      - name: Build
-        run: mvn clean install
-      - name: Prepare Assets
-        run: |
-          mkdir depminer
-          mkdir depminer/results
-          cp README.md depminer/README.md
-          cp target/depminer.jar depminer/depminer.jar
-          cp instrument.yml depminer/instrument.yml
-          cp depminer.yml depminer/depminer.yml
-          cp sanitize.yml depminer/sanitize.yml
-          cp .ignore.yml depminer/.ignore.yml
-
-      - name: Create Archive
-        run: zip -r depminer.zip depminer
-
       - name: Extract Semver
-        id: semver_parser
+        id: parse
         run: |
           semver=${TAG#"refs/tags/v"}
           semver=${semver%"-voyager"}
-          echo ::set-output name=semver::$semver
+          echo "semver=$semver" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ github.ref }}
 
-      - name: Prepare Release Notes
-        run: touch ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
+  gate:
+    needs: parse-tag
+    uses: dxworks/pipelines/.github/workflows/release-gate.yml@v1
+    with:
+      java-version: '21'
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Depminer ${{ steps.semver_parser.outputs.semver }} (Voyager)
-          body_path: ${{ github.workspace }}/releaseNotes/v${{ steps.semver_parser.outputs.semver }}.md
-          body: ""
-          prerelease: false
-          draft: false
-          fail_on_unmatched_files: true
-          files: depminer.zip
+  archive:
+    needs: [parse-tag, gate]
+    uses: dxworks/pipelines/.github/workflows/release-archive.yml@v1
+    with:
+      version: ${{ needs.parse-tag.outputs.semver }}
+      java-version: '21'
+      prepare-script: ./scripts/prepare-release-voyager.sh
+
+  github-release:
+    needs: [parse-tag, archive]
+    permissions:
+      contents: write
+    uses: dxworks/pipelines/.github/workflows/release-github.yml@v1
+    with:
+      version: ${{ needs.parse-tag.outputs.semver }}
+      tag: v${{ needs.parse-tag.outputs.semver }}-voyager
+      release-name: Depminer ${{ needs.parse-tag.outputs.semver }} (Voyager)
+      asset-name: depminer-voyager.zip
+      release-notes-file: releaseNotes/v${{ needs.parse-tag.outputs.semver }}.md
