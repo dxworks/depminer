@@ -37,6 +37,10 @@
     "rimraf": "^3.0.2",
     "sort-package-json": "^1.52.0"
   },
+  "overrides": {
+    "tar": "^7.5.11",
+    "yauzl": "^3.2.1"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://npm.pkg.github.com"
