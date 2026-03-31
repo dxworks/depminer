@@ -1,0 +1,73 @@
+<section class="depminer-summary">
+  <style>
+    .depminer-summary {
+      color: #1f2328;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .depminer-summary .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 8px 16px;
+      margin: 4px 0;
+    }
+
+    .depminer-summary .summary-item {
+      padding: 6px 8px;
+      background: #f6f8fa;
+      border-radius: 6px;
+    }
+
+    .depminer-summary table {
+      border-collapse: collapse;
+      margin-top: 12px;
+      width: 100%;
+    }
+
+    .depminer-summary th,
+    .depminer-summary td {
+      border: 1px solid #d0d7de;
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    .depminer-summary th:last-child,
+    .depminer-summary td:last-child,
+    .depminer-summary th:nth-last-child(2),
+    .depminer-summary td:nth-last-child(2) {
+      text-align: right;
+    }
+  </style>
+
+  {{#if isMissing}}
+    <p>Summary input is missing</p>
+  {{else}}
+    <div class="summary-grid">
+      <div class="summary-item"><strong>Extracted dependency files</strong><br>{{metrics.extractedFilesFormatted}}</div>
+      <div class="summary-item"><strong>Unique original paths</strong><br>{{metrics.uniqueOriginalPathsFormatted}}</div>
+      <div class="summary-item"><strong>Duplicate-renamed files</strong><br>{{metrics.duplicateRenamedCountFormatted}}</div>
+      <div class="summary-item"><strong>Missing extracted files</strong><br>{{metrics.missingExtractedFilesFormatted}}</div>
+      <div class="summary-item"><strong>Invalid index entries</strong><br>{{metrics.invalidEntriesFormatted}}</div>
+      <div class="summary-item"><strong>Generated at</strong><br>{{generatedAt}}</div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Technology</th>
+          <th>Files</th>
+          <th>Percent</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each technologyBreakdown}}
+          <tr>
+            <td>{{name}}</td>
+            <td>{{countFormatted}}</td>
+            <td>{{percent}}%</td>
+          </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  {{/if}}
+</section>
