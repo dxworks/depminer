@@ -32,9 +32,7 @@
     }
 
     .depminer-summary th:last-child,
-    .depminer-summary td:last-child,
-    .depminer-summary th:nth-last-child(2),
-    .depminer-summary td:nth-last-child(2) {
+    .depminer-summary td:last-child {
       text-align: right;
     }
   </style>
@@ -54,9 +52,8 @@
     <table>
       <thead>
         <tr>
-          <th>Technology</th>
+          <th>Dependency File Pattern</th>
           <th>Files</th>
-          <th>Percent</th>
         </tr>
       </thead>
       <tbody>
@@ -64,7 +61,6 @@
           <tr>
             <td>{{name}}</td>
             <td>{{countFormatted}}</td>
-            <td>{{percent}}%</td>
           </tr>
         {{/each}}
       </tbody>

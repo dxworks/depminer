@@ -37,13 +37,13 @@ def extract_depminer_summary(results_directory: str | Path) -> dict[str, Any]:
             status='failed',
         )
 
-    language_patterns = _load_language_patterns()
+    dependency_patterns = _load_dependency_patterns()
 
     entries: list[dict[str, str]] = []
     missing_files_count = 0
     invalid_entries_count = 0
     duplicate_renamed_count = 0
-    technologies: dict[str, int] = {}
+    dependency_files: dict[str, int] = {}
 
     for extracted_name, original_path in parsed_index.items():
         if not isinstance(extracted_name, str) or not isinstance(original_path, str):
@@ -59,10 +59,10 @@ def extract_depminer_summary(results_directory: str | Path) -> dict[str, Any]:
         if normalized_name != extracted_name:
             duplicate_renamed_count += 1
 
-        technology = _classify_technology(normalized_name, language_patterns)
-        technologies[technology] = technologies.get(technology, 0) + 1
+        dependency_file = _classify_dependency_file(normalized_name, dependency_patterns)
+        dependency_files[dependency_file] = dependency_files.get(dependency_file, 0) + 1
 
-    technology_breakdown = _build_technology_breakdown(technologies, len(entries))
+    dependency_breakdown = _build_technology_breakdown(dependency_files)
 
     status = _resolve_status(
         entries_count=len(entries),
@@ -74,7 +74,7 @@ def extract_depminer_summary(results_directory: str | Path) -> dict[str, Any]:
         entries=entries,
         missing_files_count=missing_files_count,
         invalid_entries_count=invalid_entries_count,
-        technology_breakdown=technology_breakdown,
+        technology_breakdown=dependency_breakdown,
         duplicate_renamed_count=duplicate_renamed_count,
         status=status,
     )
@@ -111,18 +111,18 @@ def _create_payload(
         f'- Invalid index entries: {_format_int(invalid_entries_count)}',
         f'- Generated at: {generated_at}',
         '',
-        '### Technology Breakdown',
+        '### Dependency File Breakdown',
         '',
-        '| Technology | Files | Percent |',
-        '| --- | ---: | ---: |',
+        '| Dependency File Pattern | Files |',
+        '| --- | ---: |',
     ]
 
     if not technology_breakdown:
-        markdown_lines.append('| _none_ | 0 | 0% |')
+        markdown_lines.append('| _none_ | 0 |')
     else:
         for row in technology_breakdown:
             markdown_lines.append(
-                f"| {row['name']} | {row['countFormatted']} | {row['percent']}% |"
+                f"| {row['name']} | {row['countFormatted']} |"
             )
 
     return {
@@ -161,25 +161,27 @@ def _normalize_duplicate_name(file_name: str) -> str:
     return f'{normalized_stem}{path.suffix}'.lower()
 
 
-def _classify_technology(normalized_file_name: str, language_patterns: dict[str, list[str]]) -> str:
-    for language, patterns in language_patterns.items():
-        for pattern in patterns:
-            if fnmatch(normalized_file_name, pattern):
-                return _display_language_name(language)
+def _classify_dependency_file(
+    normalized_file_name: str,
+    dependency_patterns: list[dict[str, str]],
+) -> str:
+    for pattern_entry in dependency_patterns:
+        if fnmatch(normalized_file_name, pattern_entry['matchPattern']):
+            return pattern_entry['displayPattern']
     return 'Other'
 
 
-def _load_language_patterns() -> dict[str, list[str]]:
+def _load_dependency_patterns() -> list[dict[str, str]]:
     depminer_file = _resolve_depminer_file()
     if depminer_file is None:
-        return {}
+        return []
 
     try:
         lines = depminer_file.read_text(encoding='utf-8', errors='replace').splitlines()
     except Exception:
-        return {}
+        return []
 
-    parsed: dict[str, list[str]] = {}
+    parsed: list[dict[str, str]] = []
     current_language: str | None = None
 
     for raw_line in lines:
@@ -191,7 +193,6 @@ def _load_language_patterns() -> dict[str, list[str]]:
 
         if not line.startswith(' ') and stripped.endswith(':'):
             current_language = stripped[:-1].strip().lower()
-            parsed.setdefault(current_language, [])
             continue
 
         if current_language is None:
@@ -200,9 +201,15 @@ def _load_language_patterns() -> dict[str, list[str]]:
         if not stripped.startswith('- '):
             continue
 
-        value = _strip_optional_quotes(stripped[2:].strip()).lower()
-        if value:
-            parsed[current_language].append(value)
+        value = _strip_optional_quotes(stripped[2:].strip())
+        normalized_value = value.lower()
+        if normalized_value:
+            parsed.append(
+                {
+                    'displayPattern': value,
+                    'matchPattern': normalized_value,
+                }
+            )
 
     return parsed
 
@@ -227,7 +234,7 @@ def _strip_optional_quotes(value: str) -> str:
     return value
 
 
-def _build_technology_breakdown(technologies: dict[str, int], total: int) -> list[dict[str, Any]]:
+def _build_technology_breakdown(technologies: dict[str, int]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
     for name, count in technologies.items():
@@ -236,32 +243,11 @@ def _build_technology_breakdown(technologies: dict[str, int], total: int) -> lis
                 'name': name,
                 'count': count,
                 'countFormatted': _format_int(count),
-                'percent': _format_percent(count, total),
             }
         )
 
     rows.sort(key=lambda row: (-int(row['count']), str(row['name']).lower()))
     return rows
-
-
-def _display_language_name(value: str) -> str:
-    lowered = value.lower()
-    if lowered == 'dotnet':
-        return '.NET'
-    if lowered == 'javascript':
-        return 'JavaScript'
-    if lowered == 'php':
-        return 'PHP'
-    return lowered.capitalize()
-
-
-def _format_percent(count: int, total: int) -> str:
-    if total <= 0:
-        return '0'
-    percent = (count / total) * 100
-    if percent.is_integer():
-        return str(int(percent))
-    return f'{percent:.2f}'.rstrip('0').rstrip('.')
 
 
 def _format_int(value: int) -> str:
