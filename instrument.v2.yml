@@ -1,0 +1,33 @@
+name: depminer
+id: depminer
+version: 2.12.0
+
+actions:
+  start:
+    commands:
+      mine-dependencies:
+        id: mine-dependencies
+        dir: ${instrumentPath}
+        command: >-
+          java -jar depminer.jar extract "${repo}" "${instrumentPath}/results"
+
+  summary:
+    md-file: results/summary.md
+    html-file: results/summary.html
+    category: External Libraries
+    commands:
+      generate-summary:
+        id: generate-summary
+        dir: ${instrumentPath}
+        command:
+          windows: py -3 lib/depminer-summary.py "${instrumentPath}/results"
+          unix: python3 lib/depminer-summary.py "${instrumentPath}/results"
+
+  pack:
+    with:
+      locations:
+        - source: ${instrumentDir}/results
+          destination: /results
+          files:
+            - summary.md
+            - summary.html
