@@ -1,6 +1,6 @@
 name: depminer
 id: depminer
-version: 1.0.0
+version: 2.12.0
 
 actions:
   start:
