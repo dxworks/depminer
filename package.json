@@ -1,6 +1,6 @@
 {
   "name": "@dxworks/depminer",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "Copies dependency files based on globs",
   "keywords": [
     "depinder",
@@ -22,11 +22,15 @@
   "bin": {
     "depminer": "dist/depminer.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "npm run clean && mkdir dist && npm run copy-files",
     "copy-files": "cp lib/*.js dist && cp target/depminer.jar dist && cp depminer.yml dist && cp .ignore.yml dist",
     "clean": "rimraf dist/",
-    "local": "npm run build && npm i"
+    "local": "npm run build && npm i",
+    "prepublishOnly": "./mvnw clean package && npm run build"
   },
   "dependencies": {
     "commander": "^14.0.2",
