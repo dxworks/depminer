@@ -37,13 +37,14 @@ def extract_depminer_summary(results_directory: str | Path) -> dict[str, Any]:
             status='failed',
         )
 
-    dependency_patterns = _load_dependency_patterns()
+    dependency_manager_by_pattern = _load_dependency_manager_map()
+    dependency_patterns = _load_dependency_patterns(dependency_manager_by_pattern)
 
     entries: list[dict[str, str]] = []
     missing_files_count = 0
     invalid_entries_count = 0
     duplicate_renamed_count = 0
-    dependency_files: dict[str, int] = {}
+    manager_projects: dict[str, set[str]] = {}
 
     for extracted_name, original_path in parsed_index.items():
         if not isinstance(extracted_name, str) or not isinstance(original_path, str):
@@ -59,10 +60,13 @@ def extract_depminer_summary(results_directory: str | Path) -> dict[str, Any]:
         if normalized_name != extracted_name:
             duplicate_renamed_count += 1
 
-        dependency_file = _classify_dependency_file(normalized_name, dependency_patterns)
-        dependency_files[dependency_file] = dependency_files.get(dependency_file, 0) + 1
+        dependency_manager = _classify_dependency_manager(normalized_name, dependency_patterns)
+        project_key = _project_key_from_original_path(original_path)
+        if dependency_manager not in manager_projects:
+            manager_projects[dependency_manager] = set()
+        manager_projects[dependency_manager].add(project_key)
 
-    dependency_breakdown = _build_technology_breakdown(dependency_files)
+    dependency_breakdown = _build_technology_breakdown(manager_projects)
 
     status = _resolve_status(
         entries_count=len(entries),
@@ -90,15 +94,12 @@ def _create_payload(
 ) -> dict[str, Any]:
     entries_count = len(entries)
     unique_original_paths = len({entry['originalPath'] for entry in entries})
-    generated_at = _iso_now()
-
     metadata = {
         'files.extracted.total': entries_count,
         'files.original.unique': unique_original_paths,
         'files.renamed.duplicates': duplicate_renamed_count,
         'files.extracted.missing': missing_files_count,
         'index.entries.invalid': invalid_entries_count,
-        'generated.at': generated_at,
     }
 
     markdown_lines = [
@@ -109,11 +110,10 @@ def _create_payload(
         f'- Duplicate-renamed files: {_format_int(duplicate_renamed_count)}',
         f'- Missing extracted files: {_format_int(missing_files_count)}',
         f'- Invalid index entries: {_format_int(invalid_entries_count)}',
-        f'- Generated at: {generated_at}',
         '',
-        '### Dependency File Breakdown',
+        '### Dependency Manager Breakdown',
         '',
-        '| Dependency File Pattern | Files |',
+        '| Dependency Manager | Projects |',
         '| --- | ---: |',
     ]
 
@@ -131,7 +131,6 @@ def _create_payload(
         'metadata': metadata,
         'markdown': '\n'.join(markdown_lines),
         'templateModel': {
-            'generatedAt': generated_at,
             'metrics': {
                 'extractedFilesFormatted': _format_int(entries_count),
                 'uniqueOriginalPathsFormatted': _format_int(unique_original_paths),
@@ -161,17 +160,17 @@ def _normalize_duplicate_name(file_name: str) -> str:
     return f'{normalized_stem}{path.suffix}'.lower()
 
 
-def _classify_dependency_file(
+def _classify_dependency_manager(
     normalized_file_name: str,
-    dependency_patterns: list[dict[str, str]],
+    dependency_patterns: list[dict[str, Any]],
 ) -> str:
     for pattern_entry in dependency_patterns:
         if fnmatch(normalized_file_name, pattern_entry['matchPattern']):
-            return pattern_entry['displayPattern']
+            return str(pattern_entry['manager'])
     return 'Other'
 
 
-def _load_dependency_patterns() -> list[dict[str, str]]:
+def _load_dependency_patterns(dependency_manager_by_pattern: dict[str, str]) -> list[dict[str, Any]]:
     depminer_file = _resolve_depminer_file()
     if depminer_file is None:
         return []
@@ -181,7 +180,7 @@ def _load_dependency_patterns() -> list[dict[str, str]]:
     except Exception:
         return []
 
-    parsed: list[dict[str, str]] = []
+    parsed: list[dict[str, Any]] = []
     current_language: str | None = None
 
     for raw_line in lines:
@@ -208,6 +207,7 @@ def _load_dependency_patterns() -> list[dict[str, str]]:
                 {
                     'displayPattern': value,
                     'matchPattern': normalized_value,
+                    'manager': _resolve_dependency_manager(value, dependency_manager_by_pattern),
                 }
             )
 
@@ -228,16 +228,60 @@ def _resolve_depminer_file() -> Path | None:
     return None
 
 
+def _load_dependency_manager_map() -> dict[str, str]:
+    manager_map_file = _resolve_dependency_manager_map_file()
+    if manager_map_file is None:
+        return {}
+
+    try:
+        lines = manager_map_file.read_text(encoding='utf-8', errors='replace').splitlines()
+    except Exception:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+
+        if ':' not in stripped:
+            continue
+
+        key, value = stripped.split(':', 1)
+        normalized_key = _strip_optional_quotes(key.strip()).lower()
+        manager = _strip_optional_quotes(value.strip())
+
+        if normalized_key and manager:
+            parsed[normalized_key] = manager
+
+    return parsed
+
+
+def _resolve_dependency_manager_map_file() -> Path | None:
+    current = Path(__file__).resolve().parent
+    candidates = [
+        current.parent / 'dependency-manager-map.yml',
+        Path.cwd() / 'dependency-manager-map.yml',
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
 def _strip_optional_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
 
 
-def _build_technology_breakdown(technologies: dict[str, int]) -> list[dict[str, Any]]:
+def _build_technology_breakdown(technologies: dict[str, set[str]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
 
-    for name, count in technologies.items():
+    for name, projects in technologies.items():
+        count = len(projects)
         rows.append(
             {
                 'name': name,
@@ -252,6 +296,25 @@ def _build_technology_breakdown(technologies: dict[str, int]) -> list[dict[str, 
 
 def _format_int(value: int) -> str:
     return f'{value:,}'
+
+
+def _resolve_dependency_manager(pattern: str, dependency_manager_by_pattern: dict[str, str]) -> str:
+    normalized_pattern = pattern.strip().lower()
+    if not normalized_pattern:
+        return 'Other'
+    return dependency_manager_by_pattern.get(normalized_pattern, 'Other')
+
+
+def _project_key_from_original_path(original_path: str) -> str:
+    normalized_path = original_path.replace('\\', '/').strip('/')
+    if not normalized_path:
+        return '.'
+
+    parts = [segment for segment in normalized_path.split('/') if segment]
+    if len(parts) <= 1:
+        return '.'
+
+    return '/'.join(parts[:-1]).lower()
 
 
 def _iso_now() -> str:
