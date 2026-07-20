@@ -9,6 +9,26 @@ commands:
     win: java -jar depminer.jar extract "${repo}" "${instrument}/results"
     unix: java -jar depminer.jar extract "${repo}" "${instrument}/results"
 
+  # Syft and Trivy run EXTRACTION-ONLY and 100% OFFLINE: SBOM inventories only,
+  # no vulnerability DBs, no network calls of any kind.
+  # run is "once", so ${repo} is the target folder holding all repositories;
+  # the wrappers loop over each project inside it and write per-project SBOMs.
+  - name: Syft SBOM
+    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/syft-wrapper.ps1" "${repo}" "${instrument}/results"
+    unix: bash "${instrument}/bin/syft-wrapper.sh" "${repo}" "${instrument}/results"
+
+  - name: Trivy Extract
+    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/trivy-wrapper.ps1" "${repo}" "${instrument}/results"
+    unix: bash "${instrument}/bin/trivy-wrapper.sh" "${repo}" "${instrument}/results"
+
 environment:
+  # Close every Syft network touchpoint. Env vars beat any stray .syft.yaml on the host.
+  # The app-update check is the only one that is ON by default; the rest are pins.
+  SYFT_CHECK_FOR_APP_UPDATE: "false"
+  SYFT_GOLANG_SEARCH_REMOTE_LICENSES: "false"
+  SYFT_GOLANG_USE_PACKAGES_LIB: "false"
+  SYFT_JAVA_USE_NETWORK: "false"
+  SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES: "false"
+  SYFT_PYTHON_SEARCH_REMOTE_LICENSES: "false"
 #  DEPMINER_DEPMINER_FILE: "depminer.yml"
 #  DEPMINER_IGNORE_FILE: ".ignore.yml"

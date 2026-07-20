@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Voyager depminer instrument — Syft wrapper (unix).
+# Extraction-only, 100% offline: every Syft network touchpoint is forced off here
+# (belt-and-braces with instrument.yml's environment block, so the wrapper is also
+# safe when run standalone outside Voyager).
+# The instrument runs "once", so <target-path> holds all repositories: each immediate
+# subdirectory is scanned as its own project; if there are none, the target itself is.
+# Usage: syft-wrapper.sh <target-path> <output-dir>
+set -euo pipefail
+
+TARGET="${1:?target path required}"
+OUT="${2:?output dir required}"
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+export SYFT_CHECK_FOR_APP_UPDATE=false
+export SYFT_GOLANG_SEARCH_REMOTE_LICENSES=false
+export SYFT_GOLANG_USE_PACKAGES_LIB=false
+export SYFT_JAVA_USE_NETWORK=false
+export SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES=false
+export SYFT_PYTHON_SEARCH_REMOTE_LICENSES=false
+
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64)   arch="amd64" ;;
+  aarch64|arm64)  arch="arm64" ;;
+esac
+case "$os" in
+  darwin) os="darwin" ;;
+  *)      os="linux"  ;;
+esac
+
+BIN="${HERE}/syft-${os}-${arch}"
+
+# Some unzip implementations (e.g. voyenv's) drop unix exec bits — restore ours.
+if [[ -f "$BIN" && ! -x "$BIN" ]]; then
+  chmod +x "$BIN" 2>/dev/null || true
+fi
+
+if [[ ! -x "$BIN" ]]; then
+  if command -v syft >/dev/null 2>&1; then
+    BIN="$(command -v syft)"
+  else
+    echo "ERROR: no bundled binary 'syft-${os}-${arch}' and no 'syft' on PATH" >&2
+    exit 1
+  fi
+fi
+
+mkdir -p "$OUT"
+echo ">> syft: $BIN"
+
+scan_one() {
+  local repo="$1" name="$2"
+  echo ">> syft scanning: ${name}"
+  "$BIN" scan "dir:${repo}" \
+    -o "syft-json=${OUT}/${name}.syft.json" \
+    -o "cyclonedx-json=${OUT}/${name}.cdx.json" \
+    -o "spdx-json=${OUT}/${name}.spdx.json" \
+    -q
+}
+
+found=0
+for d in "$TARGET"/*/; do
+  [[ -d "$d" ]] || continue
+  found=1
+  scan_one "${d%/}" "$(basename "${d%/}")"
+done
+if [[ $found -eq 0 ]]; then
+  scan_one "$TARGET" "$(basename "$TARGET")"
+fi
+
+echo ">> syft done -> ${OUT}"
