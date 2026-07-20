@@ -12,6 +12,13 @@ param(
     [Parameter(Mandatory = $true)][string]$Out
 )
 $ErrorActionPreference = "Stop"
+
+# Tool switch: ON unless explicitly disabled (see instrument.yml / README)
+if ($env:DEPMINER_RUN_TRIVY -eq "false") {
+    Write-Host ">> Trivy disabled (DEPMINER_RUN_TRIVY=false) - skipping"
+    exit 0
+}
+
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cache = Join-Path (Split-Path -Parent $here) ".trivy-cache"   # stays empty in this mode
 

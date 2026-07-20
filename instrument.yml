@@ -4,10 +4,19 @@ run: once
 results:
   - dir: ${instrument}/results
 
+# Per-tool switches (all tools are ON by default):
+#   DEPMINER_RUN_MINER=false  → skip depminer's own extraction
+#   DEPMINER_RUN_SYFT=false   → skip Syft
+#   DEPMINER_RUN_TRIVY=false  → skip Trivy
+# Set them in the mission.yml "environment:" block (wins over everything), in the
+# voyager install's .config.yml, or in the shell that launches voyager.
+# Deliberately NOT defaulted in the environment block below: instrument env overrides
+# the host shell env in Voyager, so pinning "true" here would break ad-hoc
+# `DEPMINER_RUN_X=false ./voyager.sh` usage. Defaults live in the commands/wrappers.
 commands:
   - name: Mine Dependencies
-    win: java -jar depminer.jar extract "${repo}" "${instrument}/results"
-    unix: java -jar depminer.jar extract "${repo}" "${instrument}/results"
+    win: if /I "%DEPMINER_RUN_MINER%"=="false" (echo depminer disabled - skipping) else (java -jar depminer.jar extract "${repo}" "${instrument}/results")
+    unix: if [ "${DEPMINER_RUN_MINER:-true}" = "false" ]; then echo "depminer disabled - skipping"; else java -jar depminer.jar extract "${repo}" "${instrument}/results"; fi
 
   # Syft and Trivy run EXTRACTION-ONLY and 100% OFFLINE: SBOM inventories only,
   # no vulnerability DBs, no network calls of any kind.

@@ -11,6 +11,13 @@ param(
     [Parameter(Mandatory = $true)][string]$Out
 )
 $ErrorActionPreference = "Stop"
+
+# Tool switch: ON unless explicitly disabled (see instrument.yml / README)
+if ($env:DEPMINER_RUN_SYFT -eq "false") {
+    Write-Host ">> Syft disabled (DEPMINER_RUN_SYFT=false) - skipping"
+    exit 0
+}
+
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $env:SYFT_CHECK_FOR_APP_UPDATE = "false"

@@ -11,6 +11,12 @@ set -euo pipefail
 TARGET="${1:?target path required}"
 OUT="${2:?output dir required}"
 
+# Tool switch: ON unless explicitly disabled (see instrument.yml / README)
+if [ "${DEPMINER_RUN_SYFT:-true}" = "false" ]; then
+  echo ">> Syft disabled (DEPMINER_RUN_SYFT=false) - skipping"
+  exit 0
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 export SYFT_CHECK_FOR_APP_UPDATE=false

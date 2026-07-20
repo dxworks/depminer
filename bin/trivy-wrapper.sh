@@ -11,6 +11,12 @@ set -euo pipefail
 TARGET="${1:?target path required}"
 OUT="${2:?output dir required}"
 
+# Tool switch: ON unless explicitly disabled (see instrument.yml / README)
+if [ "${DEPMINER_RUN_TRIVY:-true}" = "false" ]; then
+  echo ">> Trivy disabled (DEPMINER_RUN_TRIVY=false) - skipping"
+  exit 0
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CACHE="${HERE}/../.trivy-cache"   # stays empty in this mode; kept out of results/
 
