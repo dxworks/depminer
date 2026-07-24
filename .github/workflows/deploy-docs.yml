@@ -6,7 +6,9 @@ name: Deploy Docs
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - add-syft-trivy-extraction   # TEMP (testing): lets this branch publish. Remove before merge.
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
