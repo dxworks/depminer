@@ -1,0 +1,67 @@
+site_name: DepMiner
+site_description: >-
+  DepMiner (DepMi) — a Voyager instrument that mines dependency information and
+  produces offline SBOMs with depminer, Syft, and Trivy.
+
+repo_url: https://github.com/dxworks/depminer
+repo_name: dxworks/depminer
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; DxWorks
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.action.edit
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    # Light mode
+    - scheme: default
+      media: "(prefers-color-scheme: light)"
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      media: "(prefers-color-scheme: dark)"
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - attr_list
+  - md_in_html
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra:
+  generator: false
+
+nav:
+  - Home: index.md
+  - Quick Start: quickstart.md
+  - Preparing Your Project: prep-guide.md
+  - Configuration: configuration.md
+  - Bundled Tools: tools.md
