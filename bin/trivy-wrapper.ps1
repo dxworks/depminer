@@ -48,11 +48,29 @@ function Scan-One([string]$repo, [string]$name) {
     if ($LASTEXITCODE -ne 0) { throw "trivy failed for '$name' (exit $LASTEXITCODE)" }
 }
 
+# One failing project must not cost the others their SBOMs: log it, keep going,
+# report all failures at the end (the command then still fails in the mission summary).
+$failed = @()
 $projects = Get-ChildItem -Path $Target -Directory -ErrorAction SilentlyContinue
 if ($projects -and $projects.Count -gt 0) {
-    foreach ($p in $projects) { Scan-One $p.FullName $p.Name }
+    foreach ($p in $projects) {
+        try { Scan-One $p.FullName $p.Name }
+        catch {
+            Write-Host ">> WARN: $_ - continuing with remaining projects"
+            $failed += $p.Name
+        }
+    }
 } else {
-    Scan-One $Target (Split-Path -Leaf $Target)
+    $name = Split-Path -Leaf $Target
+    try { Scan-One $Target $name }
+    catch {
+        Write-Host ">> WARN: $_"
+        $failed += $name
+    }
 }
 
+if ($failed.Count -gt 0) {
+    Write-Host ">> trivy done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
+    exit 1
+}
 Write-Host ">> trivy done -> $Out"

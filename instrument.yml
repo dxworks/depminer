@@ -37,13 +37,15 @@ environment:
   SYFT_GOLANG_SEARCH_REMOTE_LICENSES: "false"
   SYFT_GOLANG_USE_PACKAGES_LIB: "false"
   SYFT_JAVA_USE_NETWORK: "false"
-  # Maven transitive deps, still 100% offline: resolve the full tree from the host's local
-  # Maven cache (~/.m2/repository) instead of the network. BOTH are required together, and
-  # neither alone changes anything. They only help when the client pre-populated ~/.m2 (see
-  # PREP_GUIDE.md); with an empty cache they are harmless no-ops. USE_NETWORK stays "false",
-  # so no network call is ever made. Without these, Syft reports only DECLARED Maven deps.
-  SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES: "true"
-  SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY: "true"
+  # Maven transitive deps, still 100% offline: the wrappers default
+  # SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES and SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY to
+  # "true" — resolve the full tree from the host's local Maven cache (~/.m2/repository)
+  # instead of the network. BOTH are required together; they only help when the client
+  # pre-populated ~/.m2 (see PREP_GUIDE.md), and with an empty cache they are harmless
+  # no-ops. Without them, Syft reports only DECLARED Maven deps.
+  # Like DEPMINER_RUN_* above, they are deliberately NOT pinned here so clients can set
+  # them to "false" in mission.yml / .config.yml / the host shell. USE_NETWORK stays
+  # "false" regardless, so no network call is ever made either way.
   SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES: "false"
   SYFT_PYTHON_SEARCH_REMOTE_LICENSES: "false"
 #  DEPMINER_DEPMINER_FILE: "depminer.yml"

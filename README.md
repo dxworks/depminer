@@ -65,6 +65,20 @@ environment:
   DEPMINER_RUN_TRIVY: "false"
 ```
 
+Two more switches control **Syft's offline Maven resolution** (see PREP_GUIDE.md), and
+accept the same three locations: `SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES` and
+`SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY`. Both default to `"true"` (resolve the full
+transitive tree from the local `~/.m2` cache); set **both** to `"false"` to fall back to
+declared-only Maven results. Everything stays offline either way.
+
+## When one project fails to scan
+
+Syft and Trivy scan every project in the target even if one of them fails: the failing
+project is logged with a warning, the remaining projects still get their SBOMs, and the
+command finishes with a summary of failed projects. The command then reports as FAILED in
+the mission summary — check its log to see which projects were affected; all other result
+files are still written.
+
 ## Bundled tool versions
 
 | Tool | Version | Source |

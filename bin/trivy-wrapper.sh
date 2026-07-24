@@ -64,14 +64,34 @@ scan_one() {
     "$repo"
 }
 
+# One failing project must not cost the others their SBOMs: log it, keep going,
+# report all failures at the end (the command then still fails in the mission summary).
 found=0
+fail_count=0
+fail_names=""
 for d in "$TARGET"/*/; do
   [[ -d "$d" ]] || continue
   found=1
-  scan_one "${d%/}" "$(basename "${d%/}")"
+  name="$(basename "${d%/}")"
+  scan_one "${d%/}" "$name" || {
+    rc=$?
+    echo ">> WARN: trivy failed for '${name}' (exit ${rc}) - continuing with remaining projects" >&2
+    fail_count=$((fail_count + 1))
+    fail_names="${fail_names} ${name}"
+  }
 done
 if [[ $found -eq 0 ]]; then
-  scan_one "$TARGET" "$(basename "$TARGET")"
+  name="$(basename "$TARGET")"
+  scan_one "$TARGET" "$name" || {
+    rc=$?
+    echo ">> WARN: trivy failed for '${name}' (exit ${rc})" >&2
+    fail_count=1
+    fail_names=" ${name}"
+  }
 fi
 
+if [[ $fail_count -gt 0 ]]; then
+  echo ">> trivy done with ${fail_count} failed project(s):${fail_names} -> ${OUT}" >&2
+  exit 1
+fi
 echo ">> trivy done -> ${OUT}"

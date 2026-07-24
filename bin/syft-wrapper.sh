@@ -25,8 +25,10 @@ export SYFT_GOLANG_USE_PACKAGES_LIB=false
 export SYFT_JAVA_USE_NETWORK=false
 # Maven transitive deps, still offline: resolve the tree from ~/.m2 (BOTH required; still
 # offline because USE_NETWORK stays false). No-op unless ~/.m2 is populated — see PREP_GUIDE.md.
-export SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES=true
-export SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY=true
+# Default-on but overridable: set them to "false" in mission.yml / .config.yml / the host
+# shell to skip local-repo resolution (e.g. if it is ever pathologically slow).
+export SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES="${SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES:-true}"
+export SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY="${SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY:-true}"
 export SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES=false
 export SYFT_PYTHON_SEARCH_REMOTE_LICENSES=false
 
@@ -70,14 +72,34 @@ scan_one() {
     -q
 }
 
+# One failing project must not cost the others their SBOMs: log it, keep going,
+# report all failures at the end (the command then still fails in the mission summary).
 found=0
+fail_count=0
+fail_names=""
 for d in "$TARGET"/*/; do
   [[ -d "$d" ]] || continue
   found=1
-  scan_one "${d%/}" "$(basename "${d%/}")"
+  name="$(basename "${d%/}")"
+  scan_one "${d%/}" "$name" || {
+    rc=$?
+    echo ">> WARN: syft failed for '${name}' (exit ${rc}) - continuing with remaining projects" >&2
+    fail_count=$((fail_count + 1))
+    fail_names="${fail_names} ${name}"
+  }
 done
 if [[ $found -eq 0 ]]; then
-  scan_one "$TARGET" "$(basename "$TARGET")"
+  name="$(basename "$TARGET")"
+  scan_one "$TARGET" "$name" || {
+    rc=$?
+    echo ">> WARN: syft failed for '${name}' (exit ${rc})" >&2
+    fail_count=1
+    fail_names=" ${name}"
+  }
 fi
 
+if [[ $fail_count -gt 0 ]]; then
+  echo ">> syft done with ${fail_count} failed project(s):${fail_names} -> ${OUT}" >&2
+  exit 1
+fi
 echo ">> syft done -> ${OUT}"

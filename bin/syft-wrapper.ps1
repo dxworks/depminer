@@ -26,8 +26,10 @@ $env:SYFT_GOLANG_USE_PACKAGES_LIB = "false"
 $env:SYFT_JAVA_USE_NETWORK = "false"
 # Maven transitive deps, still offline: resolve the tree from ~/.m2 (BOTH required; still
 # offline because USE_NETWORK stays false). No-op unless ~/.m2 is populated - see PREP_GUIDE.md.
-$env:SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES = "true"
-$env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY = "true"
+# Default-on but overridable: set them to "false" in mission.yml / .config.yml / the host
+# shell to skip local-repo resolution (e.g. if it is ever pathologically slow).
+if (-not $env:SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES) { $env:SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES = "true" }
+if (-not $env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY) { $env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY = "true" }
 $env:SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES = "false"
 $env:SYFT_PYTHON_SEARCH_REMOTE_LICENSES = "false"
 
@@ -52,11 +54,29 @@ function Scan-One([string]$repo, [string]$name) {
     if ($LASTEXITCODE -ne 0) { throw "syft failed for '$name' (exit $LASTEXITCODE)" }
 }
 
+# One failing project must not cost the others their SBOMs: log it, keep going,
+# report all failures at the end (the command then still fails in the mission summary).
+$failed = @()
 $projects = Get-ChildItem -Path $Target -Directory -ErrorAction SilentlyContinue
 if ($projects -and $projects.Count -gt 0) {
-    foreach ($p in $projects) { Scan-One $p.FullName $p.Name }
+    foreach ($p in $projects) {
+        try { Scan-One $p.FullName $p.Name }
+        catch {
+            Write-Host ">> WARN: $_ - continuing with remaining projects"
+            $failed += $p.Name
+        }
+    }
 } else {
-    Scan-One $Target (Split-Path -Leaf $Target)
+    $name = Split-Path -Leaf $Target
+    try { Scan-One $Target $name }
+    catch {
+        Write-Host ">> WARN: $_"
+        $failed += $name
+    }
 }
 
+if ($failed.Count -gt 0) {
+    Write-Host ">> syft done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
+    exit 1
+}
 Write-Host ">> syft done -> $Out"
