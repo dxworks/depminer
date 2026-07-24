@@ -24,6 +24,10 @@ $env:SYFT_CHECK_FOR_APP_UPDATE = "false"
 $env:SYFT_GOLANG_SEARCH_REMOTE_LICENSES = "false"
 $env:SYFT_GOLANG_USE_PACKAGES_LIB = "false"
 $env:SYFT_JAVA_USE_NETWORK = "false"
+# Maven transitive deps, still offline: resolve the tree from ~/.m2 (BOTH required; still
+# offline because USE_NETWORK stays false). No-op unless ~/.m2 is populated - see PREP_GUIDE.md.
+$env:SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES = "true"
+$env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY = "true"
 $env:SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES = "false"
 $env:SYFT_PYTHON_SEARCH_REMOTE_LICENSES = "false"
 

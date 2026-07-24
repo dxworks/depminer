@@ -9,6 +9,7 @@ TRIVY_VERSION="0.72.0"
 
 mkdir -p depminer/results depminer/bin
 cp README.md depminer/README.md
+cp PREP_GUIDE.md depminer/PREP_GUIDE.md
 cp target/depminer.jar depminer/depminer.jar
 cp instrument.yml depminer/instrument.yml
 cp depminer.yml depminer/depminer.yml

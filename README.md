@@ -16,6 +16,16 @@ linux/macOS (amd64 + arm64) and Windows (amd64) — nothing is downloaded at run
 
 **All three tools run by default.** No configuration is needed for the full run.
 
+## Getting complete results (transitive dependencies)
+
+Syft and Trivy read your project's **already-resolved** dependency state — lock files, or a
+warm local cache — they do **not** build your project. For most ecosystems the lock file is
+already committed and you need to do **nothing**. A few (Maven, Gradle, and a bare
+`requirements.txt`) need one minimal, one-time prep step first so the scan captures the full
+transitive tree instead of only the directly-declared dependencies.
+
+👉 **See [`PREP_GUIDE.md`](PREP_GUIDE.md) for the per-technology prep steps.**
+
 ## Choosing which tools run
 
 ### Per mission — list only the commands you want
