@@ -3,7 +3,7 @@
 **DepMiner (DepMi)** mines dependency information from a target folder of repositories.
 As a **Voyager instrument** it runs three tools per mission, side by side:
 
-| Command name (use exactly this in `mission.yml`) | Tool | Output in `depminer/results/` |
+| Command name (use exactly this in `mission.yml`) | Tool | Output (in `depminer/results/` inside the results zip) |
 |---|---|---|
 | `Mine Dependencies` | depminer | mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
 | `Syft SBOM` | Syft (bundled) | `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
@@ -31,8 +31,9 @@ folder and write SBOM files. Their binaries are bundled in `bin/` for linux/macO
 
 ## What it produces
 
-For every project it finds in the target folder, DepMiner writes results under
-`depminer/results/`:
+For every project it finds in the target folder, DepMiner produces the following, delivered inside
+the run's results zip (`<mission>-voyager-results.zip`, under `depminer/results/` — see
+[Quick Start → Find your results](quickstart.md#3-find-your-results)):
 
 - **Mined manifests** — the raw dependency declarations depminer extracts, plus an `index.json`.
 - **Syft SBOMs** — three formats per project: native Syft JSON, CycloneDX (`.cdx.json`), and SPDX.

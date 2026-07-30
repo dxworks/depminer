@@ -48,13 +48,28 @@ So the prep is to fill that cache once:
 
 ```bash
 # In the project directory, on a machine with internet + Maven installed:
-mvn dependency:go-offline
+mvn dependency:go-offline -fae
 # (a normal build works too and is more thorough:)
 # mvn install -DskipTests
 ```
 
 That downloads every dependency's metadata into `~/.m2/repository`. After that, both scanners
 resolve the **full transitive tree** from the cache — no network.
+
+!!! tip "Use `-fae` (fail at end) — a partial warm cache is still a big win"
+    In a large multi-module project, it is normal for a module or two to fail to resolve, and by
+    default Maven **stops at the first failure**, leaving the rest of the cache cold. `-fae`
+    (`--fail-at-end`) keeps going and warms everything it can. `-fn` (`--fail-never`) is even more
+    permissive.
+
+    The common cause is a **JDK mismatch**: older projects declare JDK-8-era artifacts such as
+    `jdk.tools:jdk.tools` or `com.sun:tools` (the old `tools.jar`), which do not exist on modern
+    JDKs and fail to resolve no matter what. Those modules simply will not be cached — every other
+    module still is, and the scan still improves enormously. If you need those modules too, run the
+    prep with the older JDK the project was written for.
+
+    Scanning is unaffected either way: prep failures never break the scan, they only limit how much
+    of the transitive tree it can see.
 
 !!! example "Measured effect (Apache Zeppelin, offline)"
     Maven components detected went from **~1000 → ~2400 (Trivy)** and **~300 → ~4000 (Syft)** once
