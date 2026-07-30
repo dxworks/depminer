@@ -3,6 +3,11 @@ site_description: >-
   DepMiner (DepMi) — a Voyager instrument that mines dependency information and
   produces offline SBOMs with depminer, Syft, and Trivy.
 
+# The published location (GitHub Pages via the org's dxworks.org domain). Required for a
+# populated sitemap.xml, canonical links, and Material's navigation.instant — all of which
+# are silently skipped when it is unset.
+site_url: https://dxworks.org/depminer/
+
 repo_url: https://github.com/dxworks/depminer
 repo_name: dxworks/depminer
 edit_uri: edit/main/docs/
