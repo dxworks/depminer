@@ -66,6 +66,7 @@ extra:
 
 nav:
   - Home: index.md
+  - Installing: install.md
   - Quick Start: quickstart.md
   - Preparing Your Project: prep-guide.md
   - Configuration: configuration.md

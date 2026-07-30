@@ -17,6 +17,8 @@ repositories; DepMiner mines the dependencies and writes SBOMs.
 - **A Voyager installation containing this instrument** — the folder holding `voyager.sh`
   (`voyager.bat` on Windows), `dx-voyager.jar`, and `instruments/depminer/`. **Run every command on
   this page from inside that folder**, and put your `mission.yml` there too.
+  Don't have one yet? See **[Installing](install.md)** — you can build one in two commands with
+  `voyenv`, without waiting for the official Voyager bundle.
 
 Syft and Trivy need **nothing** installed — their binaries ship inside the bundle.
 
