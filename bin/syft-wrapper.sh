@@ -30,6 +30,10 @@ export SYFT_JAVA_USE_NETWORK=false
 export SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES="${SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES:-true}"
 export SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY="${SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY:-true}"
 export SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES=false
+# Include devDependencies from package-lock.json / yarn.lock (pure lockfile parsing, no
+# network). Black Duck reports them, so must we. Javascript is the only Syft cataloger with
+# this switch; the other ecosystems come from Trivy's --include-dev-deps (trivy-wrapper.sh).
+export SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES=true
 export SYFT_PYTHON_SEARCH_REMOTE_LICENSES=false
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"

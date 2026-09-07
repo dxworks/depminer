@@ -50,6 +50,9 @@ fi
 mkdir -p "$OUT" "$CACHE"
 echo ">> trivy: $BIN"
 
+# --include-dev-deps keeps development-scoped packages (npm/yarn/pnpm devDependencies,
+# composer packages-dev, uv.lock dev groups, gradle) instead of pruning them: Black Duck reports them,
+# so must we. It only changes lockfile parsing — still no network.
 scan_one() {
   local repo="$1" name="$2"
   echo ">> trivy scanning: ${name}"
@@ -58,6 +61,7 @@ scan_one() {
     --offline-scan \
     --skip-db-update --skip-java-db-update \
     --disable-telemetry --skip-version-check \
+    --include-dev-deps \
     --format cyclonedx \
     --output "${OUT}/${name}.trivy.cdx.json" \
     --quiet \

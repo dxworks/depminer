@@ -34,6 +34,9 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 Write-Host ">> trivy: $bin"
 
+# --include-dev-deps keeps development-scoped packages (npm/yarn/pnpm devDependencies,
+# composer packages-dev, uv.lock dev groups, gradle) instead of pruning them: Black Duck reports them,
+# so must we. It only changes lockfile parsing - still no network.
 function Scan-One([string]$repo, [string]$name) {
     Write-Host ">> trivy scanning: $name"
     & $bin fs `
@@ -41,6 +44,7 @@ function Scan-One([string]$repo, [string]$name) {
         --offline-scan `
         --skip-db-update --skip-java-db-update `
         --disable-telemetry --skip-version-check `
+        --include-dev-deps `
         --format cyclonedx `
         --output "$Out/$name.trivy.cdx.json" `
         --quiet `
