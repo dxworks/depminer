@@ -66,14 +66,78 @@ fi
 mkdir -p "$OUT"
 echo ">> syft: $BIN"
 
+TARGET_ABS="$(cd "$TARGET" 2>/dev/null && pwd || true)"
+OUT_ABS="$(cd "$OUT" 2>/dev/null && pwd || true)"
+
+# --- Host-path scrubbing -------------------------------------------------------
+# The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
+# carry the client's filesystem layout. Both tools record the scanned directory as an
+# ABSOLUTE path in several places (Syft: source.name, source.metadata.path, the "file"
+# component in CycloneDX, the SPDX document name and namespace, plus HOME-derived cache
+# dirs under descriptor.configuration; Trivy: metadata.component.name). No CLI flag
+# covers all of them - Syft's --source-name leaves source.metadata.path and the file
+# component behind, and Trivy has no equivalent flag at all - so the emitted JSON is
+# rewritten here, after the scan.
+#
+# Repo-RELATIVE paths (syft:location:*:path, Trivy's "pom.xml" application component)
+# are deliberately left intact: the downstream parser groups components by them to
+# reconstruct project boundaries.
+_esc_re()  { printf '%s' "$1" | sed 's/[][\\.*^$\/&]/\\&/g'; }
+_esc_rep() { printf '%s' "$1" | sed 's/[\\\/&]/\\&/g'; }
+_abs()     { (cd "$1" 2>/dev/null && pwd) || true; }
+
+# _rule <absolute-path> <replacement> - appended to $_scrub_script.
+# Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
+# substituting it would corrupt unrelated text.
+_rule() {
+  local from="${1%/}" to="$2"
+  case "$from" in
+    /?*) _scrub_script="${_scrub_script}s/$(_esc_re "$from")/$(_esc_rep "$to")/g;" ;;
+  esac
+}
+
+# sanitize_files <repo-path-as-passed> <project-name> <file>...
+sanitize_files() {
+  local repo="${1%/}" name="$2"; shift 2
+  local repo_abs f tmp
+  repo_abs="$(_abs "$repo")"
+  _scrub_script=""
+  # Longest / most specific first: the repo sits under the target, which may sit
+  # under HOME. Both the path as passed and its symlink-resolved form are covered,
+  # because the tools echo back whichever spelling they were given.
+  _rule "$repo" "$name"
+  if [ -n "$repo_abs" ] && [ "$repo_abs" != "$repo" ]; then _rule "$repo_abs" "$name"; fi
+  _rule "$TARGET" "."
+  if [ -n "$TARGET_ABS" ] && [ "$TARGET_ABS" != "${TARGET%/}" ]; then _rule "$TARGET_ABS" "."; fi
+  _rule "$OUT" "."
+  if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule "$OUT_ABS" "."; fi
+  _rule "${HOME:-}" "~"
+  [ -n "$_scrub_script" ] || return 0
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    tmp="${f}.scrub"
+    if sed "$_scrub_script" "$f" > "$tmp"; then mv -f "$tmp" "$f"; else rm -f "$tmp"; fi
+  done
+}
+# -------------------------------------------------------------------------------
+
 scan_one() {
-  local repo="$1" name="$2"
+  local repo="$1" name="$2" rc=0
   echo ">> syft scanning: ${name}"
+  # --source-name pins the root component to the project name instead of the scanned
+  # path; the scrub below covers everything the flag does not reach.
   "$BIN" scan "dir:${repo}" \
+    --source-name "${name}" \
     -o "syft-json=${OUT}/${name}.syft.json" \
     -o "cyclonedx-json=${OUT}/${name}.cdx.json" \
     -o "spdx-json=${OUT}/${name}.spdx.json" \
-    -q
+    -q || rc=$?
+  # Runs even on failure: a partial SBOM must not leak host paths either.
+  sanitize_files "$repo" "$name" \
+    "${OUT}/${name}.syft.json" \
+    "${OUT}/${name}.cdx.json" \
+    "${OUT}/${name}.spdx.json"
+  return $rc
 }
 
 # One failing project must not cost the others their SBOMs: log it, keep going,
