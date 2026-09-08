@@ -37,6 +37,7 @@ Parameters can be set via CLI args, environment variables (prefixed `DEPMINER_`)
 ```
 src/main/java/org/dxworks/depminer/
   DepMi.kt                          — CLI entry point, extract/construct commands
+  ResolutionCheck.kt                — warns about unresolved .NET/Gradle/Maven projects (advisory)
   sanitization/Sanitizer.kt         — Regex-based secret sanitization engine
 
 lib/

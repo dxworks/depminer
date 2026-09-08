@@ -27,12 +27,13 @@ already does.
 
 | Your stack | What to do |
 |---|---|
-| npm / yarn / pnpm, Go, Rust, Ruby, PHP, .NET, Python (Poetry / Pipenv / uv) | **Nothing** — just make sure the lock file is committed (it usually is). |
+| npm / yarn / pnpm, Go, Rust, Ruby, PHP, Python (Poetry / Pipenv / uv) | **Nothing** — just make sure the lock file is committed (it usually is). |
 | **Maven** | Run one command to warm the local cache — see [Maven](#maven). |
 | **Gradle** | Generate lock files once — see [Gradle](#gradle). |
+| **.NET** | Run one command to write the lock files — see [.NET](#net). |
 | Python with a bare `requirements.txt` | Regenerate it fully-pinned — see [Python](#python-bare-requirementstxt). |
 
-If your project is only in the first row, you are done. The rest of this page is for the three
+If your project is only in the first row, you are done. The rest of this page is for the four
 cases that need a one-time command.
 
 !!! warning "Prep on a machine that can build the project"
@@ -75,6 +76,11 @@ resolve the **full transitive tree** from the cache — no network.
     Maven components detected went from **~1000 → ~2400 (Trivy)** and **~300 → ~4000 (Syft)** once
     `~/.m2` was warmed. Same repo, same scan — the only difference is the cache.
 
+The warm cache is what makes the offline scan work at all — it is not a speed-up. On
+spring-petclinic, Trivy finds **106** components with a populated `~/.m2`; with an empty `~/.m2`
+and offline mode it finds **16** — the direct declarations, most without a version. Same repo, same
+command.
+
 If your build machine already compiles this project regularly, `~/.m2` is **already warm** and you
 need to do nothing.
 
@@ -93,6 +99,41 @@ inside the repo:
 This writes `gradle.lockfile` (per module). Commit it. Both scanners read it and report the full
 tree — and because it lives in the repo, it is portable (no cache needed at scan time).
 
+!!! example "Measured effect (spring-petclinic)"
+    With the lock file, Trivy reaches **201 of Black Duck's 209 rows** (222 real components).
+    Without it, the repo's Gradle build contributes **0** — Trivy's only Gradle input is
+    `*.gradle.lockfile`, it never reads `build.gradle`.
+
+This matters more than it looks, even on a project you think of as Maven. The lock file also locks
+the **test** configurations, so it recovers dependencies Trivy's `pom` parser structurally cannot
+see: that parser skips `test` and `optional` scope, and the `--include-dev-deps` switch covers
+npm/yarn/gradle but **not** `pom`. On spring-petclinic those two effects are the same 96-row gap.
+
+## .NET
+
+`dotnet restore` **is not enough.** A plain restore writes `obj/project.assets.json`, and **neither
+scanner reads that file** — it yields 0 components in both Trivy and Syft. The only .NET file
+either tool reads that carries a transitive graph is `packages.lock.json`, and that is opt-in:
+
+```bash
+# On a machine with the .NET SDK + internet, solution-wide:
+dotnet restore YourSolution.sln --use-lock-file
+# (no solution file? run it per project:)
+# dotnet restore src/YourProject/YourProject.csproj --use-lock-file
+```
+
+This writes one `packages.lock.json` per project. **Commit them.** Like the Gradle lock files they
+live inside the repo, so they are portable — no cache needed at scan time.
+
+Without them, the scan falls back to `Directory.Packages.props` or the `.csproj` files, which are
+flat lists of declared versions with **no graph at all**.
+
+!!! example "Measured effect (eShopOnWeb)"
+    Unique NuGet components went from **33 → 303**, transitive dependencies from **0 → 251**, total
+    Trivy components from **34 → 1625**, and Syft's NuGet packages from **0 → 308**. Measured
+    against a Black Duck run of the same repo, recall went from **10.2% → 98.7%**. Same repo, same
+    scan — the only difference is the lock files.
+
 ## Python (bare `requirements.txt`)
 
 A hand-written `requirements.txt` usually lists only direct dependencies. Regenerate a fully
@@ -109,7 +150,7 @@ pip freeze > requirements.txt
 If you use **Poetry, Pipenv, or uv**, no prep is needed — commit `poetry.lock` / `Pipfile.lock` /
 `uv.lock` and you already have the full tree.
 
-## Everything else (npm, Go, Rust, .NET, PHP, Ruby …)
+## Everything else (npm, Go, Rust, PHP, Ruby …)
 
 No prep beyond having the lock file committed, which is normal practice:
 
@@ -118,12 +159,12 @@ No prep beyond having the lock file committed, which is normal practice:
 | npm / yarn / pnpm | `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` |
 | Go (1.17+) | `go.mod` (+ `go.sum`) |
 | Rust | `Cargo.lock` |
-| .NET | `packages.lock.json` (enable NuGet lock files if absent) |
 | PHP | `composer.lock` |
 | Ruby | `Gemfile.lock` |
 
-If one is missing, run the ecosystem's install once (`npm ci`, `dotnet restore`, …) to create it,
-and commit it.
+If one is missing, run the ecosystem's install once (`npm ci`, `composer install`, `bundle lock`,
+…) to create it, and commit it. **.NET is the exception** — its lock file is opt-in and needs a
+specific flag, see [.NET](#net).
 
 ## Where the prep must happen
 
@@ -131,7 +172,7 @@ There are two shapes of prep, and they differ in one important way:
 
 | Prep produces… | Lives in… | Portable? |
 |---|---|---|
-| A **lock file** (Gradle, npm, Python-lock, etc.) | a file **inside the repo** | :material-check: Yes — prep anywhere, the file ships with the code |
+| A **lock file** (Gradle, .NET, npm, Python-lock, etc.) | a file **inside the repo** | :material-check: Yes — prep anywhere, the file ships with the code |
 | A **warm cache** (Maven `~/.m2`) | the user's **home directory**, not the repo | :material-alert: No — see below |
 
 **Maven is the one to watch.** Its resolved data sits in `~/.m2` on whichever machine did the
