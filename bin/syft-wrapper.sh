@@ -113,11 +113,26 @@ sanitize_files() {
   if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule "$OUT_ABS" "."; fi
   _rule "${HOME:-}" "~"
   [ -n "$_scrub_script" ] || return 0
+  # A file that could not be scrubbed is DELETED, and the failure is propagated.
+  #
+  # The alternative — leaving the original in place, as this first did — fails open: the one
+  # artefact that leaves the client's machine ships with the host paths still in it, while the
+  # wrapper prints ">> done" and exits 0. sed failing is not hypothetical (an illegal byte
+  # sequence under a UTF-8 locale, a full or read-only output dir), so no SBOM at all is the
+  # correct outcome: a missing file is loud, a leaking file is silent.
+  local rc=0
   for f in "$@"; do
     [ -f "$f" ] || continue
     tmp="${f}.scrub"
-    if sed "$_scrub_script" "$f" > "$tmp"; then mv -f "$tmp" "$f"; else rm -f "$tmp"; fi
+    if sed "$_scrub_script" "$f" > "$tmp" && mv -f "$tmp" "$f"; then
+      continue
+    fi
+    rm -f "$tmp"
+    rm -f "$f"
+    echo "ERROR: could not strip host paths from $(basename "$f") - the file was deleted rather than shipped with them" >&2
+    rc=1
   done
+  return $rc
 }
 # -------------------------------------------------------------------------------
 
@@ -133,10 +148,12 @@ scan_one() {
     -o "spdx-json=${OUT}/${name}.spdx.json" \
     -q || rc=$?
   # Runs even on failure: a partial SBOM must not leak host paths either.
+  # A scrub failure fails the project even when the scan itself succeeded: shipping the
+  # unscrubbed SBOM is not an acceptable degraded outcome.
   sanitize_files "$repo" "$name" \
     "${OUT}/${name}.syft.json" \
     "${OUT}/${name}.cdx.json" \
-    "${OUT}/${name}.spdx.json"
+    "${OUT}/${name}.spdx.json" || rc=1
   return $rc
 }
 

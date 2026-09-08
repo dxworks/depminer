@@ -75,7 +75,16 @@ function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$from, [str
     $from = $from.TrimEnd('\', '/')
     # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
     # substituting it would corrupt unrelated text.
-    if ($from.Length -lt 2 -or -not [System.IO.Path]::IsPathRooted($from)) { return }
+    if (-not [System.IO.Path]::IsPathRooted($from)) { return }
+    # A ROOT is never a scrub rule. 'C:\'.TrimEnd() is 'C:', which IsPathRooted accepts, and the
+    # resulting rule rewrites every occurrence of 'C:' in the SBOM - including inside unrelated
+    # strings - corrupting the file wholesale. The unix twin rejects the analogous '/' via its
+    # `case $from in /?*)` guard; these are the Windows spellings of the same thing:
+    #   'C:'      a drive root              '\' or '/'   a rooted path with no directory
+    #   '\\server\share'  a UNC share root (nothing above it belongs to us either)
+    if ($from -match '^[A-Za-z]:$') { return }
+    if ($from -match '^[\\/]$') { return }
+    if ($from -match '^\\\\[^\\/]+\\[^\\/]+$') { return }
     foreach ($spelling in @($from, ($from -replace '\\', '\\'), ($from -replace '\\', '/'))) {
         if ($rules.ToArray() | Where-Object { $_[0] -eq $spelling }) { continue }
         [void]$rules.Add(@($spelling, $to))
@@ -95,12 +104,24 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     Add-ScrubRule $rules (Get-AbsPathOrEmpty $Out) "."
     Add-ScrubRule $rules $HOME "~"
     if ($rules.Count -eq 0) { return }
+    # A file that could not be scrubbed is DELETED, and the failure is propagated - the same
+    # fail-CLOSED rule the unix twin follows. Leaving the original in place ships the one artefact
+    # that leaves the client's machine with the host paths still in it, while the wrapper reports
+    # success. A missing file is loud; a leaking file is silent.
+    $failures = 0
     foreach ($f in $files) {
         if (-not (Test-Path -LiteralPath $f)) { continue }
-        $text = [System.IO.File]::ReadAllText($f)
-        foreach ($r in $rules) { $text = $text.Replace($r[0], $r[1]) }
-        [System.IO.File]::WriteAllText($f, $text)
+        try {
+            $text = [System.IO.File]::ReadAllText($f)
+            foreach ($r in $rules) { $text = $text.Replace($r[0], $r[1]) }
+            [System.IO.File]::WriteAllText($f, $text)
+        } catch {
+            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            Write-Error "could not strip host paths from $(Split-Path -Leaf $f) - the file was deleted rather than shipped with them" -ErrorAction Continue
+            $failures++
+        }
     }
+    if ($failures -gt 0) { throw "host-path scrubbing failed for $failures file(s)" }
 }
 # -------------------------------------------------------------------------------
 
@@ -108,13 +129,24 @@ function Scan-One([string]$repo, [string]$name) {
     Write-Host ">> syft scanning: $name"
     # --source-name pins the root component to the project name instead of the scanned
     # path; the scrub below covers everything the flag does not reach.
-    & $bin scan "dir:$repo" `
-        --source-name $name `
-        -o "syft-json=$Out/$name.syft.json" `
-        -o "cyclonedx-json=$Out/$name.cdx.json" `
-        -o "spdx-json=$Out/$name.spdx.json" `
-        -q
-    $rc = $LASTEXITCODE
+    # The scan is wrapped so the scrub ALWAYS runs, matching the unix twin's `|| rc=$?`.
+    # Under PowerShell 7.4+ $PSNativeCommandUseErrorActionPreference defaults to $true, so with
+    # $ErrorActionPreference = "Stop" a non-zero exit from the tool raises a TERMINATING error at
+    # the invocation line - which would skip the scrub entirely and leave a partial, unscrubbed
+    # SBOM in the output dir for Voyager to collect.
+    $rc = 0
+    try {
+        & $bin scan "dir:$repo" `
+            --source-name $name `
+            -o "syft-json=$Out/$name.syft.json" `
+            -o "cyclonedx-json=$Out/$name.cdx.json" `
+            -o "spdx-json=$Out/$name.spdx.json" `
+            -q
+        $rc = $LASTEXITCODE
+    } catch {
+        Write-Host ">> WARN: syft invocation failed for '$name': $_"
+        if ($LASTEXITCODE -ne 0) { $rc = $LASTEXITCODE } else { $rc = 1 }
+    }
     # Runs even on failure: a partial SBOM must not leak host paths either.
     Remove-HostPaths $repo $name @(
         "$Out/$name.syft.json",
@@ -126,7 +158,7 @@ function Scan-One([string]$repo, [string]$name) {
 # One failing project must not cost the others their SBOMs: log it, keep going,
 # report all failures at the end (the command then still fails in the mission summary).
 $failed = @()
-$projects = Get-ChildItem -Path $Target -Directory -ErrorAction SilentlyContinue
+$projects = Get-ChildItem -LiteralPath $Target -Directory -ErrorAction SilentlyContinue
 if ($projects -and $projects.Count -gt 0) {
     foreach ($p in $projects) {
         try { Scan-One $p.FullName $p.Name }
