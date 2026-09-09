@@ -53,6 +53,25 @@ echo ">> trivy: $BIN"
 TARGET_ABS="$(cd "$TARGET" 2>/dev/null && pwd || true)"
 OUT_ABS="$(cd "$OUT" 2>/dev/null && pwd || true)"
 
+# --- Staging -------------------------------------------------------------------
+# Trivy writes HERE, never straight into $OUT: a file reaches $OUT only after its
+# scrub has succeeded (see sanitize_files). That is what makes the scrub fail
+# CLOSED on every abort, not just on a failing scrub: an escaping pipeline that
+# dies under `set -e`, a SIGINT/SIGTERM, a mission timeout, even a SIGKILL all
+# leave the unscrubbed SBOM in staging and nothing in $OUT. Voyager collects $OUT.
+#
+# Staging must therefore live OUTSIDE $OUT, and mktemp -d keeps concurrent projects
+# apart (the wrappers run per project) - unlike the old fixed "${f}.scrub" name.
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/depminer-trivy.XXXXXX")"
+STAGE_ABS="$(cd "$STAGE" && pwd)"
+# Also drops the in-progress scrub tmp file (see sanitize_files) - its content is
+# already scrubbed, but a half-written file has no business being collected.
+_scrub_tmp=""
+_stage_cleanup() { rm -rf "$STAGE"; [ -z "$_scrub_tmp" ] || rm -f "$_scrub_tmp"; }
+trap '_stage_cleanup' EXIT
+trap '_stage_cleanup; exit 130' INT
+trap '_stage_cleanup; exit 143' TERM
+
 # --- Host-path scrubbing -------------------------------------------------------
 # The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
 # carry the client's filesystem layout. Both tools record the scanned directory as an
@@ -73,19 +92,32 @@ _abs()     { (cd "$1" 2>/dev/null && pwd) || true; }
 # _rule <absolute-path> <replacement> - appended to $_scrub_script.
 # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
 # substituting it would corrupt unrelated text.
+#
+# _esc_re / _esc_rep are sed pipelines themselves, so THEY can fail too - and a
+# half-escaped rule is worse than no rule at all: it still applies, matching only a
+# prefix of the path and leaving the rest of the host layout in the SBOM while sed
+# exits 0. So a failed (or empty) escape sets $_scrub_failed and sanitize_files
+# throws the whole SBOM away instead.
 _rule() {
-  local from="${1%/}" to="$2"
+  local from="${1%/}" to="$2" re rep
   case "$from" in
-    /?*) _scrub_script="${_scrub_script}s/$(_esc_re "$from")/$(_esc_rep "$to")/g;" ;;
+    /?*) ;;
+    *)   return 0 ;;
   esac
+  re="$(_esc_re "$from")"   || { _scrub_failed=1; return 0; }
+  rep="$(_esc_rep "$to")"   || { _scrub_failed=1; return 0; }
+  [ -n "$re" ]              || { _scrub_failed=1; return 0; }
+  _scrub_script="${_scrub_script}s/${re}/${rep}/g;"
 }
 
-# sanitize_files <repo-path-as-passed> <project-name> <file>...
+# sanitize_files <repo-path-as-passed> <project-name> <file-name>...
+# Each <file-name> is read from $STAGE and moved into $OUT only once scrubbed.
 sanitize_files() {
   local repo="${1%/}" name="$2"; shift 2
-  local repo_abs f tmp
+  local repo_abs f src tmp
   repo_abs="$(_abs "$repo")"
   _scrub_script=""
+  _scrub_failed=0
   # Longest / most specific first: the repo sits under the target, which may sit
   # under HOME. Both the path as passed and its symlink-resolved form are covered,
   # because the tools echo back whichever spelling they were given.
@@ -93,27 +125,54 @@ sanitize_files() {
   if [ -n "$repo_abs" ] && [ "$repo_abs" != "$repo" ]; then _rule "$repo_abs" "$name"; fi
   _rule "$TARGET" "."
   if [ -n "$TARGET_ABS" ] && [ "$TARGET_ABS" != "${TARGET%/}" ]; then _rule "$TARGET_ABS" "."; fi
+  # The staging dir takes the place $OUT used to hold in the emitted JSON (Trivy echoes
+  # back the output paths it was given), so it is rewritten to the same ".".
+  _rule "$STAGE" "."
+  if [ -n "$STAGE_ABS" ] && [ "$STAGE_ABS" != "$STAGE" ]; then _rule "$STAGE_ABS" "."; fi
   _rule "$OUT" "."
   if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule "$OUT_ABS" "."; fi
   _rule "${HOME:-}" "~"
-  [ -n "$_scrub_script" ] || return 0
-  # A file that could not be scrubbed is DELETED, and the failure is propagated.
+  # A file that could not be scrubbed is DELETED from staging, never moved into $OUT, and
+  # the failure is propagated.
   #
   # The alternative — leaving the original in place, as this first did — fails open: the one
   # artefact that leaves the client's machine ships with the host paths still in it, while the
   # wrapper prints ">> done" and exits 0. sed failing is not hypothetical (an illegal byte
   # sequence under a UTF-8 locale, a full or read-only output dir), so no SBOM at all is the
   # correct outcome: a missing file is loud, a leaking file is silent.
+  if [ "$_scrub_failed" -ne 0 ]; then
+    for f in "$@"; do rm -f "${STAGE}/${f}"; done
+    echo "ERROR: could not build the host-path scrub rules for '${name}' - no SBOM was written rather than one with host paths left in it" >&2
+    return 1
+  fi
   local rc=0
   for f in "$@"; do
-    [ -f "$f" ] || continue
-    tmp="${f}.scrub"
-    if sed "$_scrub_script" "$f" > "$tmp" && mv -f "$tmp" "$f"; then
+    src="${STAGE}/${f}"
+    [ -f "$src" ] || continue
+    # No absolute path anywhere to rewrite (everything was passed relative): the file still
+    # has to reach $OUT, it just needs no rewriting.
+    if [ -z "$_scrub_script" ]; then
+      mv -f "$src" "${OUT}/${f}" && continue
+      echo "ERROR: could not move $f into the output dir" >&2
+      rc=1
+      continue
+    fi
+    # Scrubbed output is written next to its destination, so the move into place is an
+    # atomic same-directory rename and the file keeps exactly the mode and group it got
+    # when the scanner wrote straight into $OUT. Only ALREADY-scrubbed bytes are ever
+    # written under $OUT; the name is per-process (the old fixed "${f}.scrub" was not)
+    # and hidden, and the trap removes it on any abort.
+    tmp="${OUT}/.${f}.scrub.$$"
+    _scrub_tmp="$tmp"
+    if sed "$_scrub_script" "$src" > "$tmp" && mv -f "$tmp" "${OUT}/${f}"; then
+      _scrub_tmp=""
+      rm -f "$src"
       continue
     fi
     rm -f "$tmp"
-    rm -f "$f"
-    echo "ERROR: could not strip host paths from $(basename "$f") - the file was deleted rather than shipped with them" >&2
+    _scrub_tmp=""
+    rm -f "$src"
+    echo "ERROR: could not strip host paths from ${f} - the file was deleted rather than shipped with them" >&2
     rc=1
   done
   return $rc
@@ -133,13 +192,13 @@ scan_one() {
     --disable-telemetry --skip-version-check \
     --include-dev-deps \
     --format cyclonedx \
-    --output "${OUT}/${name}.trivy.cdx.json" \
+    --output "${STAGE}/${name}.trivy.cdx.json" \
     --quiet \
     "$repo" || rc=$?
   # Runs even on failure: a partial SBOM must not leak host paths either.
   # A scrub failure fails the project even when the scan itself succeeded: shipping the
   # unscrubbed SBOM is not an acceptable degraded outcome.
-  sanitize_files "$repo" "$name" "${OUT}/${name}.trivy.cdx.json" || rc=1
+  sanitize_files "$repo" "$name" "${name}.trivy.cdx.json" || rc=1
   return $rc
 }
 

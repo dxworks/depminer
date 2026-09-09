@@ -48,6 +48,20 @@ if (-not (Test-Path $bin)) {
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 Write-Host ">> syft: $bin"
 
+# --- Staging -------------------------------------------------------------------
+# Syft writes HERE, never straight into $Out: a file reaches $Out only after
+# its scrub has succeeded (see Remove-HostPaths). Mirrors the unix twin, and closes the
+# same abort paths: a scrub that throws, a Ctrl-C, a mission timeout all leave the
+# unscrubbed SBOM in staging - never in $Out, which is what Voyager collects.
+#
+# It also removes the locked-file hazard: the old code deleted the unscrubbed file from
+# $Out with `Remove-Item -Force -ErrorAction SilentlyContinue`, so on Windows a file still
+# held open by a scanner or an AV scanner survived the delete and stayed collectable.
+# Nothing unscrubbed is written under $Out any more, so a failed delete cannot leak.
+# GetRandomFileName keeps concurrent projects apart (the wrappers run per project).
+$stage = Join-Path ([System.IO.Path]::GetTempPath()) ("depminer-syft." + [System.IO.Path]::GetRandomFileName())
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
 # --- Host-path scrubbing -------------------------------------------------------
 # The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
 # carry the client's filesystem layout. Both tools record the scanned directory as an
@@ -100,24 +114,47 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     Add-ScrubRule $rules (Get-AbsPathOrEmpty $repo) $name
     Add-ScrubRule $rules $Target "."
     Add-ScrubRule $rules (Get-AbsPathOrEmpty $Target) "."
+    # The staging dir takes the place $Out used to hold in the emitted JSON (Syft
+    # echoes back the output paths it was given), so it is rewritten to the same ".".
+    Add-ScrubRule $rules $stage "."
+    Add-ScrubRule $rules (Get-AbsPathOrEmpty $stage) "."
     Add-ScrubRule $rules $Out "."
     Add-ScrubRule $rules (Get-AbsPathOrEmpty $Out) "."
     Add-ScrubRule $rules $HOME "~"
-    if ($rules.Count -eq 0) { return }
-    # A file that could not be scrubbed is DELETED, and the failure is propagated - the same
-    # fail-CLOSED rule the unix twin follows. Leaving the original in place ships the one artefact
-    # that leaves the client's machine with the host paths still in it, while the wrapper reports
-    # success. A missing file is loud; a leaking file is silent.
+    # A file that could not be scrubbed is DELETED from staging, never moved into $Out, and
+    # the failure is propagated - the same fail-CLOSED rule the unix twin follows. Shipping it
+    # anyway would send the one artefact that leaves the client's machine with the host paths
+    # still in it, while the wrapper reports success. A missing file is loud; a leaking file
+    # is silent.
     $failures = 0
     foreach ($f in $files) {
-        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $src = Join-Path $stage $f
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $dest = Join-Path $Out $f
+        # No absolute path anywhere to rewrite (everything was passed relative): the file
+        # still has to reach $Out, it just needs no rewriting.
+        if ($rules.Count -eq 0) {
+            try { Move-Item -LiteralPath $src -Destination $dest -Force }
+            catch {
+                Write-Error "could not move $f into the output dir" -ErrorAction Continue
+                $failures++
+            }
+            continue
+        }
+        # Scrubbed text is written next to its destination and renamed into place, so the
+        # file that lands in $Out is complete or absent - never half-written. Only
+        # ALREADY-scrubbed bytes are ever written under $Out; the name is per-process.
+        $tmp = "$dest.scrub.$PID"
         try {
-            $text = [System.IO.File]::ReadAllText($f)
+            $text = [System.IO.File]::ReadAllText($src)
             foreach ($r in $rules) { $text = $text.Replace($r[0], $r[1]) }
-            [System.IO.File]::WriteAllText($f, $text)
+            [System.IO.File]::WriteAllText($tmp, $text)
+            Move-Item -LiteralPath $tmp -Destination $dest -Force
+            Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
         } catch {
-            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-            Write-Error "could not strip host paths from $(Split-Path -Leaf $f) - the file was deleted rather than shipped with them" -ErrorAction Continue
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+            Write-Error "could not strip host paths from $f - nothing was written to the output dir rather than a file with host paths in it" -ErrorAction Continue
             $failures++
         }
     }
@@ -138,9 +175,9 @@ function Scan-One([string]$repo, [string]$name) {
     try {
         & $bin scan "dir:$repo" `
             --source-name $name `
-            -o "syft-json=$Out/$name.syft.json" `
-            -o "cyclonedx-json=$Out/$name.cdx.json" `
-            -o "spdx-json=$Out/$name.spdx.json" `
+            -o "syft-json=$stage/$name.syft.json" `
+            -o "cyclonedx-json=$stage/$name.cdx.json" `
+            -o "spdx-json=$stage/$name.spdx.json" `
             -q
         $rc = $LASTEXITCODE
     } catch {
@@ -149,35 +186,42 @@ function Scan-One([string]$repo, [string]$name) {
     }
     # Runs even on failure: a partial SBOM must not leak host paths either.
     Remove-HostPaths $repo $name @(
-        "$Out/$name.syft.json",
-        "$Out/$name.cdx.json",
-        "$Out/$name.spdx.json")
+        "$name.syft.json",
+        "$name.cdx.json",
+        "$name.spdx.json")
     if ($rc -ne 0) { throw "syft failed for '$name' (exit $rc)" }
 }
 
 # One failing project must not cost the others their SBOMs: log it, keep going,
 # report all failures at the end (the command then still fails in the mission summary).
+# The finally block is this script's `trap`: PowerShell has no signal traps, but it runs
+# finally on a throw, on `exit`, and on Ctrl-C, so staging does not outlive the run.
 $failed = @()
-$projects = Get-ChildItem -LiteralPath $Target -Directory -ErrorAction SilentlyContinue
-if ($projects -and $projects.Count -gt 0) {
-    foreach ($p in $projects) {
-        try { Scan-One $p.FullName $p.Name }
+try {
+    $projects = Get-ChildItem -LiteralPath $Target -Directory -ErrorAction SilentlyContinue
+    if ($projects -and $projects.Count -gt 0) {
+        foreach ($p in $projects) {
+            try { Scan-One $p.FullName $p.Name }
+            catch {
+                Write-Host ">> WARN: $_ - continuing with remaining projects"
+                $failed += $p.Name
+            }
+        }
+    } else {
+        $name = Split-Path -Leaf $Target
+        try { Scan-One $Target $name }
         catch {
-            Write-Host ">> WARN: $_ - continuing with remaining projects"
-            $failed += $p.Name
+            Write-Host ">> WARN: $_"
+            $failed += $name
         }
     }
-} else {
-    $name = Split-Path -Leaf $Target
-    try { Scan-One $Target $name }
-    catch {
-        Write-Host ">> WARN: $_"
-        $failed += $name
-    }
-}
 
-if ($failed.Count -gt 0) {
-    Write-Host ">> syft done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
-    exit 1
+    if ($failed.Count -gt 0) {
+        Write-Host ">> syft done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
+        exit 1
+    }
+    Write-Host ">> syft done -> $Out"
 }
-Write-Host ">> syft done -> $Out"
+finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+}
