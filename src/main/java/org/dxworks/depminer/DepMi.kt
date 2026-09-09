@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOCase
+import org.apache.commons.io.filefilter.IOFileFilter
 import org.apache.commons.io.filefilter.NotFileFilter
 import org.apache.commons.io.filefilter.WildcardFileFilter
 import org.dxworks.argumenthor.Argumenthor
@@ -118,6 +119,8 @@ private fun extract(
 
     val blacklistedGlobs: ExcludedPaths = yamlMapper.readValue(File(ignoreFile))
 
+    val dirFilter = NotFileFilter(WildcardFileFilter.builder().setWildcards(blacklistedGlobs.dirs.orEmpty()).get())
+
     println("Reading Files...")
 
     val packageFiles =
@@ -131,7 +134,7 @@ private fun extract(
                         .get()
                 )
             ),
-            NotFileFilter(WildcardFileFilter.builder().setWildcards(blacklistedGlobs.dirs.orEmpty()).get())
+            dirFilter
         )
 
     val resultsMap = mutableMapOf<String, String>()
@@ -168,4 +171,19 @@ private fun extract(
     }
 
     println("\nDepMi (Dependency Miner) finished successfully! Please view your results at ${depminerResultsPath.toFile().absolutePath}")
+
+    reportResolutionState(target.toFile(), dirFilter)
+}
+
+/**
+ * Advisory only: prints a warning for every stack found in an unresolved state. Never fails the
+ * run, never changes the exit code, never changes what is extracted.
+ */
+private fun reportResolutionState(target: File, dirFilter: IOFileFilter) {
+    val warnings = runCatching { ResolutionCheck.warnings(target, dirFilter) }.getOrElse { emptyList() }
+    if (warnings.isEmpty()) return
+
+    println("\n─── Resolution check ───────────────────────────────────────────────")
+    warnings.forEach { println("$it\n") }
+    println("These stacks will be under-reported unless prepared. This is a warning, not an error.")
 }
