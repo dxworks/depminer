@@ -8,6 +8,7 @@ import java.io.File
 import java.nio.file.Path
 
 private val yamlMapper = ObjectMapper(YAMLFactory()).registerModule(KotlinModule.Builder().build())
+private val jsonMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
 
 data class SanitizationPattern(
     val pattern: String,
@@ -30,7 +31,16 @@ class Sanitizer {
      * @param resultsPath Path to the directory containing files to sanitize
      * @param sanitizeFile Path to the sanitization configuration file
      */
-    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String) {
+    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String) =
+        sanitizeFiles(resultsPath, sanitizeFile, emptyList())
+
+    /**
+     * @param hostRules literal host-path rules applied alongside the configured patterns, and
+     *   re-checked against the emitted bytes afterwards. A file that still carries host data is
+     *   STILL EMITTED — nothing is deleted or held back — and recorded in scrub-report.json,
+     *   which is the only signal that those bytes are not clean.
+     */
+    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>) {
         try {
             val sanitizationConfig: SanitizationConfig = yamlMapper.readValue(File(sanitizeFile))
 
@@ -47,13 +57,38 @@ class Sanitizer {
 
             val startTime = System.currentTimeMillis()
             var sanitizedCount = 0
+            val flagged = mutableListOf<Flagged>()
+            val projects = projectsByFile(resultsPath)
 
-            resultsPath.toFile().listFiles()?.filter { it.isFile && it.name != "index.json" }
+            resultsPath.toFile().listFiles()
+                ?.filter { it.isFile && it.name != "index.json" && it.name != "scrub-report.json" }
                 ?.forEach { file ->
-                    if (sanitizeFile(file, compiledPatterns)) {
+                    if (sanitizeFile(file, compiledPatterns, hostRules)) {
                         sanitizedCount++
                     }
+                    if (file.exists() && hostRules.isNotEmpty()) {
+                        verifyScrubbed(file, hostRules)?.let { f ->
+                            val hit = f.copy(project = projects[file.name] ?: "")
+                            flagged.add(hit)
+                            println(
+                                ">> WARNING: ${file.name} was emitted but FAILED scrub verification - " +
+                                    "it still carries host data (${hit.matchCount} occurrence(s), rules: " +
+                                    hit.matchedRules.joinToString(", ") { "\"$it\"" } +
+                                    ") - see scrub-report.json"
+                            )
+                        }
+                    }
                 }
+
+            if (hostRules.isNotEmpty()) {
+                ScrubReport.write(resultsPath, flagged)
+                if (flagged.isNotEmpty()) {
+                    println(
+                        ">> WARNING: ${flagged.size} of $sanitizedCount emitted file(s) FAILED scrub " +
+                            "verification and carry host data - see scrub-report.json"
+                    )
+                }
+            }
 
             val duration = System.currentTimeMillis() - startTime
             println("Sanitized $sanitizedCount files in ${duration}ms")
@@ -67,6 +102,12 @@ class Sanitizer {
         val replacement: String
     )
 
+    /** index.json maps each emitted file to its path under the target; the first segment names the repo. */
+    private fun projectsByFile(resultsPath: Path): Map<String, String> = runCatching {
+        val index: Map<String, String> = jsonMapper.readValue(resultsPath.resolve("index.json").toFile())
+        index.mapValues { (_, rel) -> rel.replace('\\', '/').substringBefore('/') }
+    }.getOrElse { emptyMap() }
+
     /**
      * Sanitizes a single file by applying patterns to its content
      *
@@ -74,7 +115,7 @@ class Sanitizer {
      * @param patterns List of compiled sanitization patterns to apply
      * @return true if the file was modified, false otherwise
      */
-    private fun sanitizeFile(file: File, patterns: List<CompiledPattern>): Boolean {
+    private fun sanitizeFile(file: File, patterns: List<CompiledPattern>, hostRules: List<HostRule>): Boolean {
         val tempFile = File("${file.absolutePath}.tmp")
         var modified = false
         var keyDetected = false
@@ -88,7 +129,7 @@ class Sanitizer {
                             return@forEach
                         }
 
-                        val sanitizedLine = applyPatterns(line, patterns)
+                        val sanitizedLine = scrubLine(applyPatterns(line, patterns), hostRules)
                         writer.write(sanitizedLine)
                         writer.newLine()
 

@@ -16,6 +16,7 @@ import org.dxworks.argumenthor.config.fields.impl.StringField
 import org.dxworks.argumenthor.config.sources.impl.ArgsSource
 import org.dxworks.argumenthor.config.sources.impl.EnvSource
 import org.dxworks.depminer.sanitization.Sanitizer
+import org.dxworks.depminer.sanitization.buildHostRules
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -164,7 +165,14 @@ private fun extract(
         val sanitizeFile = argumenthor.getValue<String>(SANITIZE_FILE)
         if (sanitizeFile != null) {
             println("Sanitizing files using patterns from ${File(sanitizeFile).absolutePath}")
-            Sanitizer().sanitizeFiles(depminerResultsPath, sanitizeFile)
+            // The copied files carry the host's layout - project.assets.json holds the absolute
+            // path of every csproj, the NuGet package folder and the restore config - and
+            // sanitize.yml has credential patterns only. Scrub those paths too, then check the
+            // emitted bytes and record anything still carrying them in scrub-report.json.
+            Sanitizer().sanitizeFiles(
+                depminerResultsPath, sanitizeFile,
+                buildHostRules(target, depminerResultsPath, System.getenv("HOME"))
+            )
         } else {
             println("Sanitization file path is null, skipping sanitization")
         }
