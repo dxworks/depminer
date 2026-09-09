@@ -69,7 +69,11 @@ class SyftWrapperScrubTest {
 
     private fun target(): File = tempDir("depminer-target").also { File(it, "proj").mkdirs() }
 
-    private fun emitted(out: File): List<File> = out.listFiles().orEmpty().filter { it.isFile }
+    /** The SBOMs: everything the wrapper emitted except its own report. */
+    private fun emitted(out: File): List<File> =
+        out.listFiles().orEmpty().filter { it.isFile && it.name != "scrub-report.json" }
+
+    private fun report(out: File): String = File(out, "scrub-report.json").readText()
 
     @Test
     fun `strips the scanned path and any url credentials out of the sbom`() {
@@ -82,6 +86,8 @@ class SyftWrapperScrubTest {
 
         val files = emitted(out)
         assertTrue(files.isNotEmpty(), "expected the wrapper to emit SBOMs")
+        // Written on every run, so "nothing to scan" and "withheld" are told apart without the log.
+        assertTrue(report(out).contains("\"withheld\""), report(out))
         files.forEach {
             val text = it.readText()
             assertTrue(!text.contains(target.absolutePath), "host path left in ${it.name}: $text")
@@ -93,10 +99,10 @@ class SyftWrapperScrubTest {
      * The regression this file exists for. The escaping pipeline is stubbed so that it exits 0
      * with TRUNCATED output: every rule then matches only a prefix of the host path, the scrub
      * "succeeds", and before the fix the wrapper exited 0 with the rest of the host layout in the
-     * SBOM. Nothing may reach the output dir now.
+     * SBOM. Those bytes must not reach the output dir now — but the run still finishes normally.
      */
     @Test
-    fun `emits nothing when the escaping pipeline silently truncates a rule`() {
+    fun `withholds the sbom when the escaping pipeline silently truncates a rule`() {
         val stubs = tempDir("depminer-stubs")
         stubSyft(stubs)
         script(
@@ -113,17 +119,24 @@ class SyftWrapperScrubTest {
         val target = target()
         val out = tempDir("depminer-out")
 
-        assertTrue(runWrapper(stubs, target, out) != 0, "a partially-escaped scrub must fail the run")
+        // The run carries on: a withheld file is not a failed project.
+        assertEquals(0, runWrapper(stubs, target, out))
         assertEquals(emptyList(), emitted(out).map { it.name })
+        // ...and it is recorded durably, without the leaked value being copied into the report.
+        val report = report(out)
+        assertTrue(report.contains("\"file\": \"proj.syft.json\""), report)
+        assertTrue(report.contains("\"reason\": \"host-path-scrub-verification-failed\""), report)
+        assertTrue(report.contains("\"wrapper\": \"syft\""), report)
+        assertTrue(!report.contains(target.absolutePath), "the report must not repeat the leak: $report")
     }
 
     /**
      * A rule is anchored on a path boundary, so a SIBLING directory that merely starts with the
      * same characters is no longer rewritten — unanchored, "<target>-other" became ".-other".
-     * What the anchor does not rewrite the wrapper must not ship either: the file is thrown away.
+     * What the anchor does not rewrite the wrapper must not ship either: the file is withheld.
      */
     @Test
-    fun `emits nothing when a sibling directory path survives the scrub`() {
+    fun `withholds the sbom when a sibling directory path survives the scrub`() {
         val stubs = tempDir("depminer-stubs")
         // A directory NEXT TO the target, not under it: nothing may rewrite it, and nothing may
         // ship it either.
@@ -131,7 +144,8 @@ class SyftWrapperScrubTest {
         val target = target()
         val out = tempDir("depminer-out")
 
-        assertTrue(runWrapper(stubs, target, out) != 0, "an unscrubbed sibling path must fail the run")
+        assertEquals(0, runWrapper(stubs, target, out))
         assertEquals(emptyList(), emitted(out).map { it.name })
+        assertTrue(report(out).contains("\"matchedRules\": [\"target\"]"), report(out))
     }
 }

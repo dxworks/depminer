@@ -84,7 +84,7 @@ function Get-AbsPathOrEmpty([string]$p) {
     try { return (Resolve-Path -LiteralPath $p -ErrorAction Stop).Path } catch { return "" }
 }
 
-function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$from, [string]$to) {
+function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$class, [string]$from, [string]$to) {
     if (-not $from) { return }
     $from = $from.TrimEnd('\', '/')
     # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
@@ -101,7 +101,56 @@ function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$from, [str
     if ($from -match '^\\\\[^\\/]+\\[^\\/]+$') { return }
     foreach ($spelling in @($from, ($from -replace '\\', '\\'), ($from -replace '\\', '/'))) {
         if ($rules.ToArray() | Where-Object { $_[0] -eq $spelling }) { continue }
-        [void]$rules.Add(@($spelling, $to))
+        [void]$rules.Add(@($spelling, $to, $class))
+    }
+}
+
+# --- The withheld-file report --------------------------------------------------
+# A file that still carries a host path after scrubbing is DROPPED - those bytes never ship -
+# but the run CARRIES ON: one bad SBOM must not cost a mission its other files, projects or
+# instruments. That makes a withheld file easy to miss in a long mission log, so every one is
+# recorded in $Out\scrub-report.json, written on EVERY run - empty when nothing was withheld -
+# so that "there was nothing to scan" and "the SBOM was withheld" can be told apart without
+# reading the log. The leaked VALUE never goes into the report: that would only move the leak
+# into a new file. Only the rule class that matched, and how many times.
+$script:report = Join-Path $Out "scrub-report.json"
+$script:withheld = 0
+$script:emitted = 0
+
+function Write-ScrubReport([object[]]$entries) {
+    $existing = @()
+    if (Test-Path -LiteralPath $script:report) {
+        try {
+            $parsed = Get-Content -LiteralPath $script:report -Raw | ConvertFrom-Json
+            if ($parsed.withheld) { $existing = @($parsed.withheld) }
+        } catch { $existing = @() }
+    }
+    $all = @($existing) + @($entries)
+    $doc = [ordered]@{ schemaVersion = 1; withheld = $all }
+    ($doc | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $script:report -Encoding utf8
+}
+
+function Add-Withheld([string]$project, [string]$file, [string[]]$classes, [int]$count) {
+    Write-Host (">> WARNING: withholding $file for '$project' - it still carries host data after " +
+        "scrubbing ($count occurrence(s), rules: $($classes -join ', ')) - see $(Split-Path -Leaf $script:report)")
+    Write-ScrubReport @([ordered]@{
+        timestamp     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        wrapper       = "syft"
+        project       = $project
+        file          = $file
+        reason        = "host-path-scrub-verification-failed"
+        matchedRules  = $classes
+        matchCount    = $count
+    })
+    $script:withheld++
+}
+
+# The aggregate line: a consumer must be able to see that this run's SBOM set is incomplete
+# without reading every line of the log.
+function Write-RunSummary() {
+    Write-ScrubReport @()
+    if ($script:withheld -gt 0) {
+        Write-Host ">> WARNING: $($script:withheld) of $($script:withheld + $script:emitted) SBOMs withheld - see $(Split-Path -Leaf $script:report)"
     }
 }
 
@@ -110,23 +159,20 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     # Longest / most specific first: the repo sits under the target, which may sit
     # under HOME. Both the path as passed and its resolved form are covered, because
     # the tools echo back whichever spelling they were given.
-    Add-ScrubRule $rules $repo $name
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $repo) $name
-    Add-ScrubRule $rules $Target "."
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $Target) "."
+    Add-ScrubRule $rules "repo" $repo $name
+    Add-ScrubRule $rules "repo" (Get-AbsPathOrEmpty $repo) $name
+    Add-ScrubRule $rules "target" $Target "."
+    Add-ScrubRule $rules "target" (Get-AbsPathOrEmpty $Target) "."
     # The staging dir takes the place $Out used to hold in the emitted JSON (Syft
     # echoes back the output paths it was given), so it is rewritten to the same ".".
-    Add-ScrubRule $rules $stage "."
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $stage) "."
-    Add-ScrubRule $rules $Out "."
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $Out) "."
-    Add-ScrubRule $rules $HOME "~"
-    # A file that could not be scrubbed is DELETED from staging, never moved into $Out, and
-    # the failure is propagated - the same fail-CLOSED rule the unix twin follows. Shipping it
-    # anyway would send the one artefact that leaves the client's machine with the host paths
-    # still in it, while the wrapper reports success. A missing file is loud; a leaking file
-    # is silent.
-    $failures = 0
+    Add-ScrubRule $rules "staging" $stage "."
+    Add-ScrubRule $rules "staging" (Get-AbsPathOrEmpty $stage) "."
+    Add-ScrubRule $rules "out" $Out "."
+    Add-ScrubRule $rules "out" (Get-AbsPathOrEmpty $Out) "."
+    Add-ScrubRule $rules "home" $HOME "~"
+    # A file that still carries host data is DELETED from staging and never moved into $Out -
+    # the same rule the unix twin follows. It does NOT fail the project: it is withheld,
+    # warned about, and recorded in the report, and the run carries on.
     foreach ($f in $files) {
         $src = Join-Path $stage $f
         if (-not (Test-Path -LiteralPath $src)) { continue }
@@ -156,25 +202,34 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
             # checked, not the steps: a file that still carries one of the literal paths, or a
             # credential, is thrown away and its project fails. A missing file is loud, a leaking
             # file is silent.
+            $classes = @()
+            $count = 0
             foreach ($r in $rules) {
-                if ($text.Contains($r[0])) {
-                    throw "'$($r[0])' is still present in $f after scrubbing"
+                $hits = ([regex]::Matches($text, [regex]::Escape($r[0]))).Count
+                if ($hits -gt 0) {
+                    if ($classes -notcontains $r[2]) { $classes += $r[2] }
+                    $count += $hits
                 }
             }
             if ([regex]::IsMatch($text, '://[^/"\s]*@')) {
-                throw "$f still carries credentials in a URL after scrubbing"
+                $classes += "url-userinfo"
+                $count++
+            }
+            if ($count -gt 0) {
+                Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+                Add-Withheld $name $f $classes $count
+                continue
             }
             [System.IO.File]::WriteAllText($tmp, $text)
             Move-Item -LiteralPath $tmp -Destination $dest -Force
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+            $script:emitted++
         } catch {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
-            Write-Error "could not strip host paths from $f - nothing was written to the output dir rather than a file with host paths in it" -ErrorAction Continue
-            $failures++
+            Add-Withheld $name $f @("scrub-failed") 0
         }
     }
-    if ($failures -gt 0) { throw "host-path scrubbing failed for $failures file(s)" }
 }
 # -------------------------------------------------------------------------------
 
@@ -232,6 +287,7 @@ try {
         }
     }
 
+    Write-RunSummary
     if ($failed.Count -gt 0) {
         Write-Host ">> syft done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
         exit 1

@@ -71,6 +71,66 @@ trap '_stage_cleanup' EXIT
 trap '_stage_cleanup; exit 130' INT
 trap '_stage_cleanup; exit 143' TERM
 
+_esc_re()  { printf '%s' "$1" | sed 's/[][\\.*^$\/&]/\\&/g'; }
+_esc_rep() { printf '%s' "$1" | sed 's/[\\\/&]/\\&/g'; }
+_abs()     { (cd "$1" 2>/dev/null && pwd) || true; }
+_json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+# Credentials embedded in a lockfile's "resolved" URL - https://user:token@nexus.corp/... -
+# are copied verbatim into the SBOM by the scanner. sanitize.yml never sees these files
+# (the jar sanitises its own results dir, and it runs before this wrapper), so the userinfo
+# is stripped here. A fixed script, so nothing about it can be mis-escaped. It requires the
+# "@" to come before the first "/", which is what separates credentials from an ordinary
+# path such as https://github.com/scope/pkg@1.2.3.
+_CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
+
+# --- The withheld-file report --------------------------------------------------
+# A file that still carries a host path after scrubbing is DROPPED - those bytes never ship -
+# but the run CARRIES ON: one bad SBOM must not cost a mission its other files, detectors or
+# repositories, and the wrapper still exits on the scanner's own result. That makes a
+# withheld file easy to miss in a long mission log, so every one is also recorded where a
+# consumer will look: ${OUT}/scrub-report.json, written on EVERY run - empty when nothing was
+# withheld - so that "no SBOM because there was nothing to scan" and "SBOM withheld because it
+# failed verification" can be told apart without reading the log at all.
+#
+# The leaked VALUE is never written to the report: that would just move the leak into a new
+# file. Only which rule class matched, and how many times.
+REPORT="${OUT}/scrub-report.json"
+_withheld=0
+_emitted=0
+_report_entries=""
+WRAPPER="trivy"
+
+# _report_add <project> <file> <matched-rule-classes> <match-count>
+_report_add() {
+  _report_entries="${_report_entries}{\"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"wrapper\": \"${WRAPPER}\", \"project\": \"$(_json_esc "$1")\", \"file\": \"$(_json_esc "$2")\", \"reason\": \"host-path-scrub-verification-failed\", \"matchedRules\": [$3], \"matchCount\": $4}
+"
+  _withheld=$((_withheld + 1))
+  _report_write
+}
+
+# Rewrites the report from the entries already on disk plus the ones this run has added, so
+# that the syft and trivy wrappers accumulate into the one file. Called after every failure
+# as well as at the end, so a hard kill cannot lose what was already recorded.
+_report_write() {
+  local old all line first
+  old=""
+  if [ -f "$REPORT" ]; then
+    old="$(sed -n 's/^    \({"timestamp".*}\),\{0,1\}$/\1/p' "$REPORT")"
+  fi
+  all="$(printf '%s\n%s' "$old" "$_report_entries" | grep '^{"timestamp"' || true)"
+  {
+    printf '{\n  "schemaVersion": 1,\n  "withheld": [\n'
+    first=1
+    printf '%s\n' "$all" | while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      if [ "$first" -eq 1 ]; then first=0; else printf ',\n'; fi
+      printf '    %s' "$line"
+    done
+    printf '\n  ]\n}\n'
+  } > "${REPORT}.tmp.$$" && mv -f "${REPORT}.tmp.$$" "$REPORT" && _report_entries=""
+}
+
 # --- Host-path scrubbing -------------------------------------------------------
 # The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
 # carry the client's filesystem layout. Both tools record the scanned directory as an
@@ -84,29 +144,18 @@ trap '_stage_cleanup; exit 143' TERM
 # Repo-RELATIVE paths (syft:location:*:path, Trivy's "pom.xml" application component)
 # are deliberately left intact: the downstream parser groups components by them to
 # reconstruct project boundaries.
-_esc_re()  { printf '%s' "$1" | sed 's/[][\\.*^$\/&]/\\&/g'; }
-_esc_rep() { printf '%s' "$1" | sed 's/[\\\/&]/\\&/g'; }
-_abs()     { (cd "$1" 2>/dev/null && pwd) || true; }
 
-# Credentials embedded in a lockfile's "resolved" URL - https://user:token@nexus.corp/... -
-# are copied verbatim into the SBOM by the scanner. sanitize.yml never sees these files
-# (the jar sanitises its own results dir, and it runs before this wrapper), so the userinfo
-# is stripped here. A fixed script, so nothing about it can be mis-escaped. It requires the
-# "@" to come before the first "/", which is what separates credentials from an ordinary
-# path such as https://github.com/scope/pkg@1.2.3.
-_CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
-
-# _rule <absolute-path> <replacement> - appended to $_scrub_script.
+# _rule <rule-class> <absolute-path> <replacement> - appended to $_scrub_script.
 # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
 # substituting it would corrupt unrelated text.
 #
 # _esc_re / _esc_rep are sed pipelines themselves, so THEY can fail too - and a
 # half-escaped rule is worse than no rule at all: it still applies, matching only a
 # prefix of the path and leaving the rest of the host layout in the SBOM while sed
-# exits 0. So a failed (or empty) escape sets $_scrub_failed and sanitize_files
-# throws the whole SBOM away instead.
+# exits 0. A failed (or empty) escape therefore drops the rule and lets the post-scrub
+# verification withhold the file, rather than shipping a half-scrubbed one.
 _rule() {
-  local from="${1%/}" to="$2" re rep
+  local class="$1" from="${2%/}" to="$3" re rep
   case "$from" in
     /?*) ;;
     *)   return 0 ;;
@@ -120,8 +169,9 @@ _rule() {
   # as "~andra/x": corrupted, and still carrying part of the host layout. Anything the
   # anchors now miss is caught by _verify_scrubbed instead of passing silently.
   _scrub_script="${_scrub_script}s/${re}\//${rep}\//g;s/${re}\"/${rep}\"/g;"
-  # The unescaped literal, for the post-scrub check.
-  _scrub_forbidden="${_scrub_forbidden}${from}
+  # The rule class and the unescaped literal, for the post-scrub check. Tab-separated: a
+  # path may contain spaces, but the class never does.
+  _scrub_forbidden="${_scrub_forbidden}${class}	${from}
 "
 }
 
@@ -132,20 +182,26 @@ _rule() {
 # ships with the rest of the host layout in it. That was measured on this code, not
 # imagined - which is why the exit codes are not trusted and the emitted BYTES are checked
 # instead, against the literal paths themselves (grep -F: fixed strings, nothing that can
-# be mis-escaped by the very pipeline under suspicion). A file that still carries one is
-# deleted and its project fails: a missing file is loud, a leaking file is silent.
+# be mis-escaped by the very pipeline under suspicion).
+#
+# Sets $_vf_classes (a JSON list of the rule classes that matched) and $_vf_count (how many
+# occurrences in total). Returns 1 if the file must be withheld.
 _verify_scrubbed() {
-  local file="$1" display="$2" lit rcg
-  while IFS= read -r lit; do
+  local file="$1" display="$2" class lit rcg hits
+  _vf_classes=""
+  _vf_count=0
+  while IFS='	' read -r class lit; do
     [ -n "$lit" ] || continue
-    rcg=0
-    LC_ALL=C grep -F -q -e "$lit" "$file" || rcg=$?
-    if [ "$rcg" -eq 0 ]; then
-      echo "ERROR: '${lit}' is still present in ${display} after scrubbing - the file was deleted rather than shipped with it" >&2
-      return 1
-    elif [ "$rcg" -ne 1 ]; then
-      echo "ERROR: could not verify ${display} for host paths (grep exit ${rcg}) - the file was deleted rather than shipped unchecked" >&2
-      return 1
+    hits=0
+    hits="$(LC_ALL=C grep -o -F -e "$lit" "$file" 2>/dev/null | wc -l | tr -d ' ')" || hits=0
+    [ -n "$hits" ] || hits=0
+    if [ "$hits" -gt 0 ]; then
+      case "$_vf_classes" in
+        *"\"${class}\""*) ;;
+        "")  _vf_classes="\"${class}\"" ;;
+        *)   _vf_classes="${_vf_classes}, \"${class}\"" ;;
+      esac
+      _vf_count=$((_vf_count + hits))
     fi
   done <<EOF
 ${_scrub_forbidden}
@@ -153,17 +209,30 @@ EOF
   rcg=0
   LC_ALL=C grep -E -q '://[^/"[:space:]]*@' "$file" || rcg=$?
   if [ "$rcg" -eq 0 ]; then
-    echo "ERROR: ${display} still carries credentials in a URL after scrubbing - the file was deleted rather than shipped with them" >&2
-    return 1
+    case "$_vf_classes" in
+      "") _vf_classes='"url-userinfo"' ;;
+      *)  _vf_classes="${_vf_classes}, \"url-userinfo\"" ;;
+    esac
+    _vf_count=$((_vf_count + 1))
   elif [ "$rcg" -ne 1 ]; then
-    echo "ERROR: could not verify ${display} for URL credentials (grep exit ${rcg}) - the file was deleted rather than shipped unchecked" >&2
-    return 1
+    # grep itself could not read the file: unverifiable is treated exactly like unclean.
+    _vf_classes='"unverifiable"'
+    _vf_count=$((_vf_count + 1))
   fi
+  [ "$_vf_count" -eq 0 ] || return 1
   return 0
 }
 
+# _withhold <project> <file-name> <classes> <count> - one loud line per dropped file, and a
+# durable record. The value that leaked is deliberately absent from both.
+_withhold() {
+  echo ">> WARNING: withholding ${2} for '${1}' - it still carries host data after scrubbing (${4} occurrence(s), rules: ${3}) - see $(basename "$REPORT")" >&2
+  _report_add "$1" "$2" "$3" "$4"
+}
+
 # sanitize_files <repo-path-as-passed> <project-name> <file-name>...
-# Each <file-name> is read from $STAGE and moved into $OUT only once scrubbed.
+# Each <file-name> is read from $STAGE and moved into $OUT only once scrubbed AND verified.
+# It never fails the project: a file is either emitted or withheld and reported.
 sanitize_files() {
   local repo="${1%/}" name="$2"; shift 2
   local repo_abs f src tmp
@@ -174,31 +243,26 @@ sanitize_files() {
   # Longest / most specific first: the repo sits under the target, which may sit
   # under HOME. Both the path as passed and its symlink-resolved form are covered,
   # because the tools echo back whichever spelling they were given.
-  _rule "$repo" "$name"
-  if [ -n "$repo_abs" ] && [ "$repo_abs" != "$repo" ]; then _rule "$repo_abs" "$name"; fi
-  _rule "$TARGET" "."
-  if [ -n "$TARGET_ABS" ] && [ "$TARGET_ABS" != "${TARGET%/}" ]; then _rule "$TARGET_ABS" "."; fi
-  # The staging dir takes the place $OUT used to hold in the emitted JSON (Trivy echoes
+  _rule repo "$repo" "$name"
+  if [ -n "$repo_abs" ] && [ "$repo_abs" != "$repo" ]; then _rule repo "$repo_abs" "$name"; fi
+  _rule target "$TARGET" "."
+  if [ -n "$TARGET_ABS" ] && [ "$TARGET_ABS" != "${TARGET%/}" ]; then _rule target "$TARGET_ABS" "."; fi
+  # The staging dir takes the place $OUT used to hold in the emitted JSON (the scanner echoes
   # back the output paths it was given), so it is rewritten to the same ".".
-  _rule "$STAGE" "."
-  if [ -n "$STAGE_ABS" ] && [ "$STAGE_ABS" != "$STAGE" ]; then _rule "$STAGE_ABS" "."; fi
-  _rule "$OUT" "."
-  if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule "$OUT_ABS" "."; fi
-  _rule "${HOME:-}" "~"
-  # A file that could not be scrubbed is DELETED from staging, never moved into $OUT, and
-  # the failure is propagated.
-  #
-  # The alternative — leaving the original in place, as this first did — fails open: the one
-  # artefact that leaves the client's machine ships with the host paths still in it, while the
-  # wrapper prints ">> done" and exits 0. sed failing is not hypothetical (an illegal byte
-  # sequence under a UTF-8 locale, a full or read-only output dir), so no SBOM at all is the
-  # correct outcome: a missing file is loud, a leaking file is silent.
+  _rule staging "$STAGE" "."
+  if [ -n "$STAGE_ABS" ] && [ "$STAGE_ABS" != "$STAGE" ]; then _rule staging "$STAGE_ABS" "."; fi
+  _rule out "$OUT" "."
+  if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule out "$OUT_ABS" "."; fi
+  _rule home "${HOME:-}" "~"
+  # The rules could not even be built: nothing can be scrubbed, so nothing is emitted.
   if [ "$_scrub_failed" -ne 0 ]; then
-    for f in "$@"; do rm -f "${STAGE}/${f}"; done
-    echo "ERROR: could not build the host-path scrub rules for '${name}' - no SBOM was written rather than one with host paths left in it" >&2
-    return 1
+    for f in "$@"; do
+      [ -f "${STAGE}/${f}" ] || continue
+      rm -f "${STAGE}/${f}"
+      _withhold "$name" "$f" '"rule-construction-failed"' 0
+    done
+    return 0
   fi
-  local rc=0
   for f in "$@"; do
     src="${STAGE}/${f}"
     [ -f "$src" ] || continue
@@ -207,16 +271,24 @@ sanitize_files() {
     # checked, so even a SIGKILL cannot expose a half-scrubbed file there. The name is
     # per-process (the old fixed "${f}.scrub" was not) and the trap removes all of staging.
     tmp="${src}.scrub.$$"
-    if sed "$_scrub_script" "$src" > "$tmp" && _verify_scrubbed "$tmp" "$f" && mv -f "$tmp" "${OUT}/${f}"; then
-      rm -f "$src"
-      continue
+    if sed "$_scrub_script" "$src" > "$tmp" 2>/dev/null; then
+      if _verify_scrubbed "$tmp" "$f"; then
+        if mv -f "$tmp" "${OUT}/${f}"; then
+          rm -f "$src"
+          _emitted=$((_emitted + 1))
+          continue
+        fi
+        _withhold "$name" "$f" '"move-failed"' 0
+      else
+        _withhold "$name" "$f" "$_vf_classes" "$_vf_count"
+      fi
+    else
+      _withhold "$name" "$f" '"scrub-failed"' 0
     fi
     rm -f "$tmp"
     rm -f "$src"
-    echo "ERROR: could not strip host paths from ${f} - the file was deleted rather than shipped with them" >&2
-    rc=1
   done
-  return $rc
+  return 0
 }
 # -------------------------------------------------------------------------------
 
@@ -236,11 +308,21 @@ scan_one() {
     --output "${STAGE}/${name}.trivy.cdx.json" \
     --quiet \
     "$repo" || rc=$?
-  # Runs even on failure: a partial SBOM must not leak host paths either.
-  # A scrub failure fails the project even when the scan itself succeeded: shipping the
-  # unscrubbed SBOM is not an acceptable degraded outcome.
-  sanitize_files "$repo" "$name" "${name}.trivy.cdx.json" || rc=1
+  # Runs even on failure: a partial SBOM must not leak host paths either. It does not touch
+  # $rc - a file that cannot be scrubbed is withheld and reported, never shipped, but it does
+  # not fail the project: the remaining files, projects and instruments carry on.
+  sanitize_files "$repo" "$name" "${name}.trivy.cdx.json"
   return $rc
+}
+
+# The report is written on every run, withheld files or not, so a consumer can tell "there
+# was nothing to scan" from "the SBOM was withheld" without parsing the log. The aggregate
+# line makes an incomplete SBOM set visible without reading every line of it.
+_run_summary() {
+  _report_write
+  if [ "$_withheld" -gt 0 ]; then
+    echo ">> WARNING: ${_withheld} of $((_emitted + _withheld)) SBOMs withheld - see $(basename "$REPORT")" >&2
+  fi
 }
 
 # One failing project must not cost the others their SBOMs: log it, keep going,
@@ -269,6 +351,7 @@ if [[ $found -eq 0 ]]; then
   }
 fi
 
+_run_summary
 if [[ $fail_count -gt 0 ]]; then
   echo ">> trivy done with ${fail_count} failed project(s):${fail_names} -> ${OUT}" >&2
   exit 1
