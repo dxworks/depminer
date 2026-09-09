@@ -34,6 +34,20 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 Write-Host ">> trivy: $bin"
 
+# --- Staging -------------------------------------------------------------------
+# Trivy writes HERE, never straight into $Out: a file reaches $Out only after
+# its scrub has succeeded (see Remove-HostPaths). Mirrors the unix twin, and closes the
+# same abort paths: a scrub that throws, a Ctrl-C, a mission timeout all leave the
+# unscrubbed SBOM in staging - never in $Out, which is what Voyager collects.
+#
+# It also removes the locked-file hazard: the old code deleted the unscrubbed file from
+# $Out with `Remove-Item -Force -ErrorAction SilentlyContinue`, so on Windows a file still
+# held open by a scanner or an AV scanner survived the delete and stayed collectable.
+# Nothing unscrubbed is written under $Out any more, so a failed delete cannot leak.
+# GetRandomFileName keeps concurrent projects apart (the wrappers run per project).
+$stage = Join-Path ([System.IO.Path]::GetTempPath()) ("depminer-trivy." + [System.IO.Path]::GetRandomFileName())
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
 # --- Host-path scrubbing -------------------------------------------------------
 # The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
 # carry the client's filesystem layout. Both tools record the scanned directory as an
@@ -56,7 +70,7 @@ function Get-AbsPathOrEmpty([string]$p) {
     try { return (Resolve-Path -LiteralPath $p -ErrorAction Stop).Path } catch { return "" }
 }
 
-function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$from, [string]$to) {
+function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$class, [string]$from, [string]$to) {
     if (-not $from) { return }
     $from = $from.TrimEnd('\', '/')
     # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
@@ -73,7 +87,58 @@ function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$from, [str
     if ($from -match '^\\\\[^\\/]+\\[^\\/]+$') { return }
     foreach ($spelling in @($from, ($from -replace '\\', '\\'), ($from -replace '\\', '/'))) {
         if ($rules.ToArray() | Where-Object { $_[0] -eq $spelling }) { continue }
-        [void]$rules.Add(@($spelling, $to))
+        [void]$rules.Add(@($spelling, $to, $class))
+    }
+}
+
+# --- The withheld-file report --------------------------------------------------
+# A file that still carries a host path after scrubbing IS STILL EMITTED - Alex's call. Nothing
+# is deleted, held back or renamed, and the run carries on and exits on the scanner's own
+# result. The consequence is stated plainly because it is the whole point of this block: those
+# bytes ship, and $Out\scrub-report.json is the ONLY record that they are not clean.
+#
+# It is written on EVERY run - with an empty "flagged" list when everything verified - so that
+# "there was nothing to scan" and "this file shipped with host data in it" can be told apart
+# without reading the log. The array is called "flagged", not "withheld": nothing was.
+# The leaked VALUE never goes into the report: that would only copy the leak into a new file.
+$script:report = Join-Path $Out "scrub-report.json"
+$script:flagged = 0
+$script:emitted = 0
+
+function Write-ScrubReport([object[]]$entries) {
+    $existing = @()
+    if (Test-Path -LiteralPath $script:report) {
+        try {
+            $parsed = Get-Content -LiteralPath $script:report -Raw | ConvertFrom-Json
+            if ($parsed.flagged) { $existing = @($parsed.flagged) }
+        } catch { $existing = @() }
+    }
+    $all = @($existing) + @($entries)
+    $doc = [ordered]@{ schemaVersion = 1; flagged = $all }
+    ($doc | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $script:report -Encoding utf8
+}
+
+function Add-Flagged([string]$project, [string]$file, [string[]]$classes, [int]$count) {
+    Write-Host (">> WARNING: $file for '$project' was emitted but FAILED scrub verification - it " +
+        "still carries host data ($count occurrence(s), rules: $($classes -join ', ')) - see $(Split-Path -Leaf $script:report)")
+    Write-ScrubReport @([ordered]@{
+        timestamp     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        wrapper       = "trivy"
+        project       = $project
+        file          = $file
+        reason        = "emitted-despite-failed-scrub-verification"
+        matchedRules  = $classes
+        matchCount    = $count
+    })
+    $script:flagged++
+}
+
+# The aggregate line: a consumer must be able to see that some of this run's output carries host
+# data without reading every line of the log.
+function Write-RunSummary() {
+    Write-ScrubReport @()
+    if ($script:flagged -gt 0) {
+        Write-Host ">> WARNING: $($script:flagged) of $($script:emitted) emitted file(s) FAILED scrub verification and carry host data - see $(Split-Path -Leaf $script:report)"
     }
 }
 
@@ -82,32 +147,80 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     # Longest / most specific first: the repo sits under the target, which may sit
     # under HOME. Both the path as passed and its resolved form are covered, because
     # the tools echo back whichever spelling they were given.
-    Add-ScrubRule $rules $repo $name
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $repo) $name
-    Add-ScrubRule $rules $Target "."
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $Target) "."
-    Add-ScrubRule $rules $Out "."
-    Add-ScrubRule $rules (Get-AbsPathOrEmpty $Out) "."
-    Add-ScrubRule $rules $HOME "~"
-    if ($rules.Count -eq 0) { return }
-    # A file that could not be scrubbed is DELETED, and the failure is propagated - the same
-    # fail-CLOSED rule the unix twin follows. Leaving the original in place ships the one artefact
-    # that leaves the client's machine with the host paths still in it, while the wrapper reports
-    # success. A missing file is loud; a leaking file is silent.
-    $failures = 0
+    Add-ScrubRule $rules "repo" $repo $name
+    Add-ScrubRule $rules "repo" (Get-AbsPathOrEmpty $repo) $name
+    Add-ScrubRule $rules "target" $Target "."
+    Add-ScrubRule $rules "target" (Get-AbsPathOrEmpty $Target) "."
+    # The staging dir takes the place $Out used to hold in the emitted JSON (Trivy
+    # echoes back the output paths it was given), so it is rewritten to the same ".".
+    Add-ScrubRule $rules "staging" $stage "."
+    Add-ScrubRule $rules "staging" (Get-AbsPathOrEmpty $stage) "."
+    Add-ScrubRule $rules "out" $Out "."
+    Add-ScrubRule $rules "out" (Get-AbsPathOrEmpty $Out) "."
+    Add-ScrubRule $rules "home" $HOME "~"
+    # NOTHING IS EVER DELETED OR HELD BACK - the same rule the unix twin follows. A file whose
+    # verification fails is emitted anyway, in its best-effort scrubbed form, and the report is
+    # the only record that it is not clean. It does not fail the project either.
     foreach ($f in $files) {
-        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $src = Join-Path $stage $f
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $dest = Join-Path $Out $f
+        # Scrubbed text is written next to its destination and renamed into place, so the
+        # file that lands in $Out is complete or absent - never half-written. Only
+        # ALREADY-scrubbed AND VERIFIED bytes are ever written under $Out; the name is
+        # per-process.
+        $tmp = "$dest.scrub.$PID"
         try {
-            $text = [System.IO.File]::ReadAllText($f)
-            foreach ($r in $rules) { $text = $text.Replace($r[0], $r[1]) }
-            [System.IO.File]::WriteAllText($f, $text)
+            $text = [System.IO.File]::ReadAllText($src)
+            foreach ($r in $rules) {
+                # Anchored on a path boundary: the match must be followed by a separator or by
+                # the closing quote of the JSON string. An unanchored Replace() also rewrites a
+                # SIBLING directory that merely starts with the same characters - with
+                # HOME=C:\Users\alex, "C:\Users\alexandra\x" came out as "~andra\x":
+                # corrupted, and still carrying part of the host layout. Anything the anchor
+                # now misses is caught by the verification below instead of passing silently.
+                $text = [regex]::Replace($text, [regex]::Escape($r[0]) + '(?=[/\\"])', $r[1].Replace('$', '$$'))
+            }
+            # Credentials embedded in a lockfile's "resolved" URL - https://user:token@nexus/... -
+            # are copied verbatim into the SBOM by the scanner, and sanitize.yml never sees these
+            # files (the jar sanitises its own results dir, and it runs before this wrapper).
+            $text = [regex]::Replace($text, '://[^/"\s]*@', '://')
+            # The scrub is a chain of string rewrites, and a rule that silently matched nothing
+            # leaves the host layout in a file the wrapper then reports as done. So the RESULT is
+            # checked, not the steps: a file that still carries one of the literal paths, or a
+            # credential, is thrown away and its project fails. A missing file is loud, a leaking
+            # file is silent.
+            $classes = @()
+            $count = 0
+            foreach ($r in $rules) {
+                $hits = ([regex]::Matches($text, [regex]::Escape($r[0]))).Count
+                if ($hits -gt 0) {
+                    if ($classes -notcontains $r[2]) { $classes += $r[2] }
+                    $count += $hits
+                }
+            }
+            if ([regex]::IsMatch($text, '://[^/"\s]*@')) {
+                $classes += "url-userinfo"
+                $count++
+            }
+            [System.IO.File]::WriteAllText($tmp, $text)
+            Move-Item -LiteralPath $tmp -Destination $dest -Force
+            Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+            $script:emitted++
+            if ($count -gt 0) { Add-Flagged $name $f $classes $count }
         } catch {
-            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-            Write-Error "could not strip host paths from $(Split-Path -Leaf $f) - the file was deleted rather than shipped with them" -ErrorAction Continue
-            $failures++
+            # The rewrite itself failed, so there is no scrubbed version: the staged original is
+            # the only complete file, and it is emitted rather than dropped.
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            try {
+                Move-Item -LiteralPath $src -Destination $dest -Force
+                $script:emitted++
+                Add-Flagged $name $f @("scrub-command-failed") 0
+            } catch {
+                Write-Host ">> WARNING: could not move $f into the output dir for '$name'"
+            }
         }
     }
-    if ($failures -gt 0) { throw "host-path scrubbing failed for $failures file(s)" }
 }
 # -------------------------------------------------------------------------------
 
@@ -130,42 +243,60 @@ function Scan-One([string]$repo, [string]$name) {
             --disable-telemetry --skip-version-check `
             --include-dev-deps `
             --format cyclonedx `
-            --output "$Out/$name.trivy.cdx.json" `
+            --output "$stage/$name.trivy.cdx.json" `
             --quiet `
-            $repo
+            $repo 2> "$stage/$name.trivy.err.log"
         $rc = $LASTEXITCODE
     } catch {
         Write-Host ">> WARN: trivy invocation failed for '$name': $_"
         if ($LASTEXITCODE -ne 0) { $rc = $LASTEXITCODE } else { $rc = 1 }
     }
+    # The scanner's diagnostics were going only to the mission log, which Voyager does not collect
+    # with the results: an empty or short SBOM then had no explanation travelling next to it. They
+    # are captured here, still echoed so the mission log keeps them, and kept only when non-empty.
+    # The log is scrubbed like any other emitted file - it quotes paths too.
+    $err = Join-Path $stage "$name.trivy.err.log"
+    if ((Test-Path -LiteralPath $err) -and (Get-Item -LiteralPath $err).Length -gt 0) {
+        Get-Content -LiteralPath $err | ForEach-Object { Write-Host $_ }
+    } else {
+        Remove-Item -LiteralPath $err -Force -ErrorAction SilentlyContinue
+    }
     # Runs even on failure: a partial SBOM must not leak host paths either.
-    Remove-HostPaths $repo $name @("$Out/$name.trivy.cdx.json")
+    Remove-HostPaths $repo $name @("$name.trivy.cdx.json", "$name.trivy.err.log")
     if ($rc -ne 0) { throw "trivy failed for '$name' (exit $rc)" }
 }
 
 # One failing project must not cost the others their SBOMs: log it, keep going,
 # report all failures at the end (the command then still fails in the mission summary).
+# The finally block is this script's `trap`: PowerShell has no signal traps, but it runs
+# finally on a throw, on `exit`, and on Ctrl-C, so staging does not outlive the run.
 $failed = @()
-$projects = Get-ChildItem -LiteralPath $Target -Directory -ErrorAction SilentlyContinue
-if ($projects -and $projects.Count -gt 0) {
-    foreach ($p in $projects) {
-        try { Scan-One $p.FullName $p.Name }
+try {
+    $projects = Get-ChildItem -LiteralPath $Target -Directory -ErrorAction SilentlyContinue
+    if ($projects -and $projects.Count -gt 0) {
+        foreach ($p in $projects) {
+            try { Scan-One $p.FullName $p.Name }
+            catch {
+                Write-Host ">> WARN: $_ - continuing with remaining projects"
+                $failed += $p.Name
+            }
+        }
+    } else {
+        $name = Split-Path -Leaf $Target
+        try { Scan-One $Target $name }
         catch {
-            Write-Host ">> WARN: $_ - continuing with remaining projects"
-            $failed += $p.Name
+            Write-Host ">> WARN: $_"
+            $failed += $name
         }
     }
-} else {
-    $name = Split-Path -Leaf $Target
-    try { Scan-One $Target $name }
-    catch {
-        Write-Host ">> WARN: $_"
-        $failed += $name
-    }
-}
 
-if ($failed.Count -gt 0) {
-    Write-Host ">> trivy done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
-    exit 1
+    Write-RunSummary
+    if ($failed.Count -gt 0) {
+        Write-Host ">> trivy done with $($failed.Count) failed project(s): $($failed -join ', ') -> $Out"
+        exit 1
+    }
+    Write-Host ">> trivy done -> $Out"
 }
-Write-Host ">> trivy done -> $Out"
+finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+}

@@ -110,7 +110,7 @@ object ResolutionCheck {
         return message(
             stack = "Maven",
             head = "${poms.size} pom.xml project(s) found, but the local Maven cache " +
-                "(${m2Repository?.path ?: "~/.m2/repository"}) is missing or empty on this machine",
+                "(${m2Repository?.homeRelative() ?: "~/.m2/repository"}) is missing or empty on this machine",
             effect = "You will get direct declarations only — the cache is what resolves the transitive tree " +
                 "offline (measured on spring-petclinic: 106 components with a warm cache, 16 with an empty one).",
             fix = "run `mvn dependency:go-offline` (or a normal build) on THIS machine before scanning."
@@ -127,6 +127,17 @@ object ResolutionCheck {
         appendLine("  $effect")
         appendLine("  Fix: $fix")
         append("  See PREP_GUIDE.md.")
+    }
+
+    // The scan is supposed to give away nothing about the client's filesystem layout - the SBOM
+    // wrappers rewrite $HOME to "~" for exactly that reason - so this warning, printed by the same
+    // run, must not put the absolute cache path back into the log.
+    private fun File.homeRelative(): String {
+        val home = System.getProperty("user.home").orEmpty().trimEnd(File.separatorChar)
+        val self = absoluteFile.normalize().path
+        return if (home.isNotEmpty() && (self == home || self.startsWith(home + File.separator)))
+            "~" + self.substring(home.length)
+        else self
     }
 
     private fun File.dirPath(): String = (parentFile ?: this).absoluteFile.normalize().path + File.separator
