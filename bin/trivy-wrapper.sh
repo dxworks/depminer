@@ -85,27 +85,28 @@ _json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 _CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
 
 # --- The withheld-file report --------------------------------------------------
-# A file that still carries a host path after scrubbing is DROPPED - those bytes never ship -
-# but the run CARRIES ON: one bad SBOM must not cost a mission its other files, detectors or
-# repositories, and the wrapper still exits on the scanner's own result. That makes a
-# withheld file easy to miss in a long mission log, so every one is also recorded where a
-# consumer will look: ${OUT}/scrub-report.json, written on EVERY run - empty when nothing was
-# withheld - so that "no SBOM because there was nothing to scan" and "SBOM withheld because it
-# failed verification" can be told apart without reading the log at all.
+# A file that still carries a host path after scrubbing IS STILL EMITTED - Alex's call. Nothing
+# is deleted, held back or renamed, and the run carries on and exits on the scanner's own
+# result. The consequence is stated plainly because it is the whole point of this file: those
+# bytes ship, and ${OUT}/scrub-report.json is the ONLY record that they are not clean.
 #
-# The leaked VALUE is never written to the report: that would just move the leak into a new
+# It is written on EVERY run - with an empty "flagged" list when everything verified - so that
+# "there was nothing to scan" and "this file shipped with host data in it" can be told apart
+# without reading the log at all. The array is called "flagged", not "withheld": nothing was.
+#
+# The leaked VALUE is never written to the report: that would just copy the leak into a new
 # file. Only which rule class matched, and how many times.
 REPORT="${OUT}/scrub-report.json"
-_withheld=0
+_flagged=0
 _emitted=0
 _report_entries=""
 WRAPPER="trivy"
 
 # _report_add <project> <file> <matched-rule-classes> <match-count>
 _report_add() {
-  _report_entries="${_report_entries}{\"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"wrapper\": \"${WRAPPER}\", \"project\": \"$(_json_esc "$1")\", \"file\": \"$(_json_esc "$2")\", \"reason\": \"host-path-scrub-verification-failed\", \"matchedRules\": [$3], \"matchCount\": $4}
+  _report_entries="${_report_entries}{\"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"wrapper\": \"${WRAPPER}\", \"project\": \"$(_json_esc "$1")\", \"file\": \"$(_json_esc "$2")\", \"reason\": \"emitted-despite-failed-scrub-verification\", \"matchedRules\": [$3], \"matchCount\": $4}
 "
-  _withheld=$((_withheld + 1))
+  _flagged=$((_flagged + 1))
   _report_write
 }
 
@@ -120,7 +121,7 @@ _report_write() {
   fi
   all="$(printf '%s\n%s' "$old" "$_report_entries" | grep '^{"timestamp"' || true)"
   {
-    printf '{\n  "schemaVersion": 1,\n  "withheld": [\n'
+    printf '{\n  "schemaVersion": 1,\n  "flagged": [\n'
     first=1
     printf '%s\n' "$all" | while IFS= read -r line; do
       [ -n "$line" ] || continue
@@ -223,16 +224,23 @@ EOF
   return 0
 }
 
-# _withhold <project> <file-name> <classes> <count> - one loud line per dropped file, and a
-# durable record. The value that leaked is deliberately absent from both.
-_withhold() {
-  echo ">> WARNING: withholding ${2} for '${1}' - it still carries host data after scrubbing (${4} occurrence(s), rules: ${3}) - see $(basename "$REPORT")" >&2
+# _flag <project> <file-name> <classes> <count> - one loud line per file that failed
+# verification, and a durable record. The file is still EMITTED (see sanitize_files), so this
+# line and the report are the only signal that it carries host data. The value itself is
+# deliberately absent from both.
+_flag() {
+  echo ">> WARNING: ${2} for '${1}' was emitted but FAILED scrub verification - it still carries host data (${4} occurrence(s), rules: ${3}) - see $(basename "$REPORT")" >&2
   _report_add "$1" "$2" "$3" "$4"
 }
 
 # sanitize_files <repo-path-as-passed> <project-name> <file-name>...
-# Each <file-name> is read from $STAGE and moved into $OUT only once scrubbed AND verified.
-# It never fails the project: a file is either emitted or withheld and reported.
+# Each <file-name> is read from $STAGE, scrubbed, and moved into $OUT.
+#
+# NOTHING IS EVER DELETED OR HELD BACK - Alex's call, made with the consequence stated: a file
+# whose verification fails is shipped anyway, host data and all. Every file the scanner produced
+# reaches $OUT, in its best-effort scrubbed form. The verification therefore no longer decides
+# what ships; it decides what gets REPORTED, and scrub-report.json is the only record that a
+# given file is not clean. It never fails the project either.
 sanitize_files() {
   local repo="${1%/}" name="$2"; shift 2
   local repo_abs f src tmp
@@ -254,39 +262,43 @@ sanitize_files() {
   _rule out "$OUT" "."
   if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule out "$OUT_ABS" "."; fi
   _rule home "${HOME:-}" "~"
-  # The rules could not even be built: nothing can be scrubbed, so nothing is emitted.
+  # The rules could not even be built, so nothing can be rewritten: the files are emitted
+  # unscrubbed, and every one of them is flagged.
   if [ "$_scrub_failed" -ne 0 ]; then
     for f in "$@"; do
       [ -f "${STAGE}/${f}" ] || continue
-      rm -f "${STAGE}/${f}"
-      _withhold "$name" "$f" '"rule-construction-failed"' 0
+      mv -f "${STAGE}/${f}" "${OUT}/${f}" || true
+      _emitted=$((_emitted + 1))
+      _flag "$name" "$f" '"rule-construction-failed"' 0
     done
     return 0
   fi
   for f in "$@"; do
     src="${STAGE}/${f}"
     [ -f "$src" ] || continue
-    # The scrubbed copy is written in staging and only moves into $OUT once _verify_scrubbed
-    # has read it back: not one byte reaches the collected directory before it has been
-    # checked, so even a SIGKILL cannot expose a half-scrubbed file there. The name is
-    # per-process (the old fixed "${f}.scrub" was not) and the trap removes all of staging.
+    # The scrubbed copy is written in staging and read back by _verify_scrubbed before it moves
+    # into $OUT, so nothing half-written is ever collected and a SIGKILL still leaves $OUT
+    # untouched. The name is per-process (the old fixed "${f}.scrub" was not) and the trap
+    # removes all of staging. What verification no longer does is decide whether the file ships.
     tmp="${src}.scrub.$$"
-    if sed "$_scrub_script" "$src" > "$tmp" 2>/dev/null; then
-      if _verify_scrubbed "$tmp" "$f"; then
-        if mv -f "$tmp" "${OUT}/${f}"; then
-          rm -f "$src"
-          _emitted=$((_emitted + 1))
-          continue
-        fi
-        _withhold "$name" "$f" '"move-failed"' 0
-      else
-        _withhold "$name" "$f" "$_vf_classes" "$_vf_count"
+    if sed "$_scrub_script" "$src" > "$tmp"; then
+      _verify_scrubbed "$tmp" "$f" || true
+      if mv -f "$tmp" "${OUT}/${f}"; then
+        rm -f "$src"
+        _emitted=$((_emitted + 1))
+        [ "$_vf_count" -eq 0 ] || _flag "$name" "$f" "$_vf_classes" "$_vf_count"
+        continue
       fi
-    else
-      _withhold "$name" "$f" '"scrub-failed"' 0
+      echo ">> WARNING: could not move ${f} into the output dir for '${name}'" >&2
+      rm -f "$tmp"
+      continue
     fi
+    # sed itself failed, so there is no scrubbed version to ship: the staged original is the only
+    # complete file, and it is emitted rather than dropped.
     rm -f "$tmp"
-    rm -f "$src"
+    mv -f "$src" "${OUT}/${f}" || true
+    _emitted=$((_emitted + 1))
+    _flag "$name" "$f" '"scrub-command-failed"' 0
   done
   return 0
 }
@@ -307,21 +319,30 @@ scan_one() {
     --format cyclonedx \
     --output "${STAGE}/${name}.trivy.cdx.json" \
     --quiet \
-    "$repo" || rc=$?
+    "$repo" 2> "${STAGE}/${name}.trivy.err.log" || rc=$?
+  # The scanner's diagnostics were going only to the mission log, which Voyager does not collect
+  # with the results: an empty or short SBOM then had no explanation travelling next to it. They
+  # are captured here, still echoed so the mission log keeps them, and kept only when non-empty.
+  # The log goes through sanitize_files like any other emitted file - it quotes paths too.
+  if [ -s "${STAGE}/${name}.trivy.err.log" ]; then
+    cat "${STAGE}/${name}.trivy.err.log" >&2
+  else
+    rm -f "${STAGE}/${name}.trivy.err.log"
+  fi
   # Runs even on failure: a partial SBOM must not leak host paths either. It does not touch
-  # $rc - a file that cannot be scrubbed is withheld and reported, never shipped, but it does
-  # not fail the project: the remaining files, projects and instruments carry on.
-  sanitize_files "$repo" "$name" "${name}.trivy.cdx.json"
+  # $rc - a file whose scrub could not be verified is flagged and reported, not held back, and
+  # it does not fail the project: the remaining files, projects and instruments carry on.
+  sanitize_files "$repo" "$name" "${name}.trivy.cdx.json" "${name}.trivy.err.log"
   return $rc
 }
 
-# The report is written on every run, withheld files or not, so a consumer can tell "there
-# was nothing to scan" from "the SBOM was withheld" without parsing the log. The aggregate
-# line makes an incomplete SBOM set visible without reading every line of it.
+# The report is written on every run, flagged files or not, so a consumer can tell "there was
+# nothing to scan" from "the file shipped with host data in it" without parsing the log. The
+# aggregate line makes that visible without reading every line of it.
 _run_summary() {
   _report_write
-  if [ "$_withheld" -gt 0 ]; then
-    echo ">> WARNING: ${_withheld} of $((_emitted + _withheld)) SBOMs withheld - see $(basename "$REPORT")" >&2
+  if [ "$_flagged" -gt 0 ]; then
+    echo ">> WARNING: ${_flagged} of ${_emitted} emitted file(s) FAILED scrub verification and carry host data - see $(basename "$REPORT")" >&2
   fi
 }
 

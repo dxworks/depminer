@@ -106,15 +106,17 @@ function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$class, [st
 }
 
 # --- The withheld-file report --------------------------------------------------
-# A file that still carries a host path after scrubbing is DROPPED - those bytes never ship -
-# but the run CARRIES ON: one bad SBOM must not cost a mission its other files, projects or
-# instruments. That makes a withheld file easy to miss in a long mission log, so every one is
-# recorded in $Out\scrub-report.json, written on EVERY run - empty when nothing was withheld -
-# so that "there was nothing to scan" and "the SBOM was withheld" can be told apart without
-# reading the log. The leaked VALUE never goes into the report: that would only move the leak
-# into a new file. Only the rule class that matched, and how many times.
+# A file that still carries a host path after scrubbing IS STILL EMITTED - Alex's call. Nothing
+# is deleted, held back or renamed, and the run carries on and exits on the scanner's own
+# result. The consequence is stated plainly because it is the whole point of this block: those
+# bytes ship, and $Out\scrub-report.json is the ONLY record that they are not clean.
+#
+# It is written on EVERY run - with an empty "flagged" list when everything verified - so that
+# "there was nothing to scan" and "this file shipped with host data in it" can be told apart
+# without reading the log. The array is called "flagged", not "withheld": nothing was.
+# The leaked VALUE never goes into the report: that would only copy the leak into a new file.
 $script:report = Join-Path $Out "scrub-report.json"
-$script:withheld = 0
+$script:flagged = 0
 $script:emitted = 0
 
 function Write-ScrubReport([object[]]$entries) {
@@ -122,35 +124,35 @@ function Write-ScrubReport([object[]]$entries) {
     if (Test-Path -LiteralPath $script:report) {
         try {
             $parsed = Get-Content -LiteralPath $script:report -Raw | ConvertFrom-Json
-            if ($parsed.withheld) { $existing = @($parsed.withheld) }
+            if ($parsed.flagged) { $existing = @($parsed.flagged) }
         } catch { $existing = @() }
     }
     $all = @($existing) + @($entries)
-    $doc = [ordered]@{ schemaVersion = 1; withheld = $all }
+    $doc = [ordered]@{ schemaVersion = 1; flagged = $all }
     ($doc | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $script:report -Encoding utf8
 }
 
-function Add-Withheld([string]$project, [string]$file, [string[]]$classes, [int]$count) {
-    Write-Host (">> WARNING: withholding $file for '$project' - it still carries host data after " +
-        "scrubbing ($count occurrence(s), rules: $($classes -join ', ')) - see $(Split-Path -Leaf $script:report)")
+function Add-Flagged([string]$project, [string]$file, [string[]]$classes, [int]$count) {
+    Write-Host (">> WARNING: $file for '$project' was emitted but FAILED scrub verification - it " +
+        "still carries host data ($count occurrence(s), rules: $($classes -join ', ')) - see $(Split-Path -Leaf $script:report)")
     Write-ScrubReport @([ordered]@{
         timestamp     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         wrapper       = "syft"
         project       = $project
         file          = $file
-        reason        = "host-path-scrub-verification-failed"
+        reason        = "emitted-despite-failed-scrub-verification"
         matchedRules  = $classes
         matchCount    = $count
     })
-    $script:withheld++
+    $script:flagged++
 }
 
-# The aggregate line: a consumer must be able to see that this run's SBOM set is incomplete
-# without reading every line of the log.
+# The aggregate line: a consumer must be able to see that some of this run's output carries host
+# data without reading every line of the log.
 function Write-RunSummary() {
     Write-ScrubReport @()
-    if ($script:withheld -gt 0) {
-        Write-Host ">> WARNING: $($script:withheld) of $($script:withheld + $script:emitted) SBOMs withheld - see $(Split-Path -Leaf $script:report)"
+    if ($script:flagged -gt 0) {
+        Write-Host ">> WARNING: $($script:flagged) of $($script:emitted) emitted file(s) FAILED scrub verification and carry host data - see $(Split-Path -Leaf $script:report)"
     }
 }
 
@@ -170,9 +172,9 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     Add-ScrubRule $rules "out" $Out "."
     Add-ScrubRule $rules "out" (Get-AbsPathOrEmpty $Out) "."
     Add-ScrubRule $rules "home" $HOME "~"
-    # A file that still carries host data is DELETED from staging and never moved into $Out -
-    # the same rule the unix twin follows. It does NOT fail the project: it is withheld,
-    # warned about, and recorded in the report, and the run carries on.
+    # NOTHING IS EVER DELETED OR HELD BACK - the same rule the unix twin follows. A file whose
+    # verification fails is emitted anyway, in its best-effort scrubbed form, and the report is
+    # the only record that it is not clean. It does not fail the project either.
     foreach ($f in $files) {
         $src = Join-Path $stage $f
         if (-not (Test-Path -LiteralPath $src)) { continue }
@@ -215,19 +217,22 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
                 $classes += "url-userinfo"
                 $count++
             }
-            if ($count -gt 0) {
-                Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
-                Add-Withheld $name $f $classes $count
-                continue
-            }
             [System.IO.File]::WriteAllText($tmp, $text)
             Move-Item -LiteralPath $tmp -Destination $dest -Force
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
             $script:emitted++
+            if ($count -gt 0) { Add-Flagged $name $f $classes $count }
         } catch {
+            # The rewrite itself failed, so there is no scrubbed version: the staged original is
+            # the only complete file, and it is emitted rather than dropped.
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
-            Add-Withheld $name $f @("scrub-failed") 0
+            try {
+                Move-Item -LiteralPath $src -Destination $dest -Force
+                $script:emitted++
+                Add-Flagged $name $f @("scrub-command-failed") 0
+            } catch {
+                Write-Host ">> WARNING: could not move $f into the output dir for '$name'"
+            }
         }
     }
 }
@@ -244,22 +249,33 @@ function Scan-One([string]$repo, [string]$name) {
     # SBOM in the output dir for Voyager to collect.
     $rc = 0
     try {
+        # The scanner's diagnostics were going only to the mission log, which Voyager does not
+        # collect with the results: an empty or short SBOM then had no explanation travelling next
+        # to it. They are captured here, still echoed so the mission log keeps them, and kept only
+        # when non-empty. The log is scrubbed like any other emitted file - it quotes paths too.
         & $bin scan "dir:$repo" `
             --source-name $name `
             -o "syft-json=$stage/$name.syft.json" `
             -o "cyclonedx-json=$stage/$name.cdx.json" `
             -o "spdx-json=$stage/$name.spdx.json" `
-            -q
+            -q 2> "$stage/$name.syft.err.log"
         $rc = $LASTEXITCODE
     } catch {
         Write-Host ">> WARN: syft invocation failed for '$name': $_"
         if ($LASTEXITCODE -ne 0) { $rc = $LASTEXITCODE } else { $rc = 1 }
     }
     # Runs even on failure: a partial SBOM must not leak host paths either.
+    $err = Join-Path $stage "$name.syft.err.log"
+    if ((Test-Path -LiteralPath $err) -and (Get-Item -LiteralPath $err).Length -gt 0) {
+        Get-Content -LiteralPath $err | ForEach-Object { Write-Host $_ }
+    } else {
+        Remove-Item -LiteralPath $err -Force -ErrorAction SilentlyContinue
+    }
     Remove-HostPaths $repo $name @(
         "$name.syft.json",
         "$name.cdx.json",
-        "$name.spdx.json")
+        "$name.spdx.json",
+        "$name.syft.err.log")
     if ($rc -ne 0) { throw "syft failed for '$name' (exit $rc)" }
 }
 

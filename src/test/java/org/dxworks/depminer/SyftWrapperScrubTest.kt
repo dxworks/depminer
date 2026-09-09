@@ -87,7 +87,7 @@ class SyftWrapperScrubTest {
         val files = emitted(out)
         assertTrue(files.isNotEmpty(), "expected the wrapper to emit SBOMs")
         // Written on every run, so "nothing to scan" and "withheld" are told apart without the log.
-        assertTrue(report(out).contains("\"withheld\""), report(out))
+        assertTrue(report(out).contains("\"flagged\""), report(out))
         files.forEach {
             val text = it.readText()
             assertTrue(!text.contains(target.absolutePath), "host path left in ${it.name}: $text")
@@ -97,12 +97,13 @@ class SyftWrapperScrubTest {
 
     /**
      * The regression this file exists for. The escaping pipeline is stubbed so that it exits 0
-     * with TRUNCATED output: every rule then matches only a prefix of the host path, the scrub
-     * "succeeds", and before the fix the wrapper exited 0 with the rest of the host layout in the
-     * SBOM. Those bytes must not reach the output dir now — but the run still finishes normally.
+     * with TRUNCATED output: every rule then matches only a prefix of the host path, so the scrub
+     * "succeeds" while the host layout survives in the SBOM — and before, NOTHING said so. The
+     * file is still emitted (nothing is ever held back), so what is asserted here is that the
+     * failure is recorded: the wrapper is no longer silent about it.
      */
     @Test
-    fun `withholds the sbom when the escaping pipeline silently truncates a rule`() {
+    fun `records the sbom when the escaping pipeline silently truncates a rule`() {
         val stubs = tempDir("depminer-stubs")
         stubSyft(stubs)
         script(
@@ -119,13 +120,14 @@ class SyftWrapperScrubTest {
         val target = target()
         val out = tempDir("depminer-out")
 
-        // The run carries on: a withheld file is not a failed project.
+        // The run carries on, and nothing is held back: every file the scanner produced is emitted.
         assertEquals(0, runWrapper(stubs, target, out))
-        assertEquals(emptyList(), emitted(out).map { it.name })
-        // ...and it is recorded durably, without the leaked value being copied into the report.
+        assertTrue(emitted(out).any { it.name == "proj.syft.json" }, emitted(out).map { it.name }.toString())
+        // The report is the only record that what shipped is not clean - and it must not itself
+        // repeat the value that leaked.
         val report = report(out)
         assertTrue(report.contains("\"file\": \"proj.syft.json\""), report)
-        assertTrue(report.contains("\"reason\": \"host-path-scrub-verification-failed\""), report)
+        assertTrue(report.contains("\"reason\": \"emitted-despite-failed-scrub-verification\""), report)
         assertTrue(report.contains("\"wrapper\": \"syft\""), report)
         assertTrue(!report.contains(target.absolutePath), "the report must not repeat the leak: $report")
     }
@@ -133,10 +135,10 @@ class SyftWrapperScrubTest {
     /**
      * A rule is anchored on a path boundary, so a SIBLING directory that merely starts with the
      * same characters is no longer rewritten — unanchored, "<target>-other" became ".-other".
-     * What the anchor does not rewrite the wrapper must not ship either: the file is withheld.
+     * What the anchor does not rewrite still ships, so it has to be reported.
      */
     @Test
-    fun `withholds the sbom when a sibling directory path survives the scrub`() {
+    fun `records the sbom when a sibling directory path survives the scrub`() {
         val stubs = tempDir("depminer-stubs")
         // A directory NEXT TO the target, not under it: nothing may rewrite it, and nothing may
         // ship it either.
@@ -145,7 +147,8 @@ class SyftWrapperScrubTest {
         val out = tempDir("depminer-out")
 
         assertEquals(0, runWrapper(stubs, target, out))
-        assertEquals(emptyList(), emitted(out).map { it.name })
+        assertTrue(emitted(out).any { it.name == "proj.syft.json" }, emitted(out).map { it.name }.toString())
         assertTrue(report(out).contains("\"matchedRules\": [\"target\"]"), report(out))
+        assertTrue(!report(out).contains(target.absolutePath), "the report must not repeat the leak")
     }
 }
