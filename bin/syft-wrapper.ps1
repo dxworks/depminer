@@ -131,23 +131,39 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
         $src = Join-Path $stage $f
         if (-not (Test-Path -LiteralPath $src)) { continue }
         $dest = Join-Path $Out $f
-        # No absolute path anywhere to rewrite (everything was passed relative): the file
-        # still has to reach $Out, it just needs no rewriting.
-        if ($rules.Count -eq 0) {
-            try { Move-Item -LiteralPath $src -Destination $dest -Force }
-            catch {
-                Write-Error "could not move $f into the output dir" -ErrorAction Continue
-                $failures++
-            }
-            continue
-        }
         # Scrubbed text is written next to its destination and renamed into place, so the
         # file that lands in $Out is complete or absent - never half-written. Only
-        # ALREADY-scrubbed bytes are ever written under $Out; the name is per-process.
+        # ALREADY-scrubbed AND VERIFIED bytes are ever written under $Out; the name is
+        # per-process.
         $tmp = "$dest.scrub.$PID"
         try {
             $text = [System.IO.File]::ReadAllText($src)
-            foreach ($r in $rules) { $text = $text.Replace($r[0], $r[1]) }
+            foreach ($r in $rules) {
+                # Anchored on a path boundary: the match must be followed by a separator or by
+                # the closing quote of the JSON string. An unanchored Replace() also rewrites a
+                # SIBLING directory that merely starts with the same characters - with
+                # HOME=C:\Users\alex, "C:\Users\alexandra\x" came out as "~andra\x":
+                # corrupted, and still carrying part of the host layout. Anything the anchor
+                # now misses is caught by the verification below instead of passing silently.
+                $text = [regex]::Replace($text, [regex]::Escape($r[0]) + '(?=[/\\"])', $r[1].Replace('$', '$$'))
+            }
+            # Credentials embedded in a lockfile's "resolved" URL - https://user:token@nexus/... -
+            # are copied verbatim into the SBOM by the scanner, and sanitize.yml never sees these
+            # files (the jar sanitises its own results dir, and it runs before this wrapper).
+            $text = [regex]::Replace($text, '://[^/"\s]*@', '://')
+            # The scrub is a chain of string rewrites, and a rule that silently matched nothing
+            # leaves the host layout in a file the wrapper then reports as done. So the RESULT is
+            # checked, not the steps: a file that still carries one of the literal paths, or a
+            # credential, is thrown away and its project fails. A missing file is loud, a leaking
+            # file is silent.
+            foreach ($r in $rules) {
+                if ($text.Contains($r[0])) {
+                    throw "'$($r[0])' is still present in $f after scrubbing"
+                }
+            }
+            if ([regex]::IsMatch($text, '://[^/"\s]*@')) {
+                throw "$f still carries credentials in a URL after scrubbing"
+            }
             [System.IO.File]::WriteAllText($tmp, $text)
             Move-Item -LiteralPath $tmp -Destination $dest -Force
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue

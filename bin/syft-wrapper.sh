@@ -80,10 +80,9 @@ OUT_ABS="$(cd "$OUT" 2>/dev/null && pwd || true)"
 # apart (the wrappers run per project) - unlike the old fixed "${f}.scrub" name.
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/depminer-syft.XXXXXX")"
 STAGE_ABS="$(cd "$STAGE" && pwd)"
-# Also drops the in-progress scrub tmp file (see sanitize_files) - its content is
-# already scrubbed, but a half-written file has no business being collected.
-_scrub_tmp=""
-_stage_cleanup() { rm -rf "$STAGE"; [ -z "$_scrub_tmp" ] || rm -f "$_scrub_tmp"; }
+# The in-progress scrub tmp file lives in staging too (see sanitize_files), so this
+# drops it as well: nothing that has not been verified is ever written under $OUT.
+_stage_cleanup() { rm -rf "$STAGE"; }
 trap '_stage_cleanup' EXIT
 trap '_stage_cleanup; exit 130' INT
 trap '_stage_cleanup; exit 143' TERM
@@ -105,6 +104,14 @@ _esc_re()  { printf '%s' "$1" | sed 's/[][\\.*^$\/&]/\\&/g'; }
 _esc_rep() { printf '%s' "$1" | sed 's/[\\\/&]/\\&/g'; }
 _abs()     { (cd "$1" 2>/dev/null && pwd) || true; }
 
+# Credentials embedded in a lockfile's "resolved" URL - https://user:token@nexus.corp/... -
+# are copied verbatim into the SBOM by the scanner. sanitize.yml never sees these files
+# (the jar sanitises its own results dir, and it runs before this wrapper), so the userinfo
+# is stripped here. A fixed script, so nothing about it can be mis-escaped. It requires the
+# "@" to come before the first "/", which is what separates credentials from an ordinary
+# path such as https://github.com/scope/pkg@1.2.3.
+_CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
+
 # _rule <absolute-path> <replacement> - appended to $_scrub_script.
 # Only ABSOLUTE paths are rewritten: a relative one cannot leak a host layout, and
 # substituting it would corrupt unrelated text.
@@ -123,7 +130,52 @@ _rule() {
   re="$(_esc_re "$from")"   || { _scrub_failed=1; return 0; }
   rep="$(_esc_rep "$to")"   || { _scrub_failed=1; return 0; }
   [ -n "$re" ]              || { _scrub_failed=1; return 0; }
-  _scrub_script="${_scrub_script}s/${re}/${rep}/g;"
+  # Anchored on a path boundary: the match must be followed by "/" or by the closing quote
+  # of the JSON string. Unanchored, a rule also rewrites a SIBLING directory that merely
+  # starts with the same characters - with HOME=/Users/alex, "/Users/alexandra/x" came out
+  # as "~andra/x": corrupted, and still carrying part of the host layout. Anything the
+  # anchors now miss is caught by _verify_scrubbed instead of passing silently.
+  _scrub_script="${_scrub_script}s/${re}\//${rep}\//g;s/${re}\"/${rep}\"/g;"
+  # The unescaped literal, for the post-scrub check.
+  _scrub_forbidden="${_scrub_forbidden}${from}
+"
+}
+
+# _verify_scrubbed <scrubbed-file> <display-name>
+# The scrub rules are built by two sed pipelines and applied by a third, and a sed that
+# writes TRUNCATED output while exiting 0 yields a rule matching only a PREFIX of the host
+# path: the file is rewritten, every command succeeds, ">> done" is printed, and the SBOM
+# ships with the rest of the host layout in it. That was measured on this code, not
+# imagined - which is why the exit codes are not trusted and the emitted BYTES are checked
+# instead, against the literal paths themselves (grep -F: fixed strings, nothing that can
+# be mis-escaped by the very pipeline under suspicion). A file that still carries one is
+# deleted and its project fails: a missing file is loud, a leaking file is silent.
+_verify_scrubbed() {
+  local file="$1" display="$2" lit rcg
+  while IFS= read -r lit; do
+    [ -n "$lit" ] || continue
+    rcg=0
+    LC_ALL=C grep -F -q -e "$lit" "$file" || rcg=$?
+    if [ "$rcg" -eq 0 ]; then
+      echo "ERROR: '${lit}' is still present in ${display} after scrubbing - the file was deleted rather than shipped with it" >&2
+      return 1
+    elif [ "$rcg" -ne 1 ]; then
+      echo "ERROR: could not verify ${display} for host paths (grep exit ${rcg}) - the file was deleted rather than shipped unchecked" >&2
+      return 1
+    fi
+  done <<EOF
+${_scrub_forbidden}
+EOF
+  rcg=0
+  LC_ALL=C grep -E -q '://[^/"[:space:]]*@' "$file" || rcg=$?
+  if [ "$rcg" -eq 0 ]; then
+    echo "ERROR: ${display} still carries credentials in a URL after scrubbing - the file was deleted rather than shipped with them" >&2
+    return 1
+  elif [ "$rcg" -ne 1 ]; then
+    echo "ERROR: could not verify ${display} for URL credentials (grep exit ${rcg}) - the file was deleted rather than shipped unchecked" >&2
+    return 1
+  fi
+  return 0
 }
 
 # sanitize_files <repo-path-as-passed> <project-name> <file-name>...
@@ -132,7 +184,8 @@ sanitize_files() {
   local repo="${1%/}" name="$2"; shift 2
   local repo_abs f src tmp
   repo_abs="$(_abs "$repo")"
-  _scrub_script=""
+  _scrub_script="$_CRED_RULE"
+  _scrub_forbidden=""
   _scrub_failed=0
   # Longest / most specific first: the repo sits under the target, which may sit
   # under HOME. Both the path as passed and its symlink-resolved form are covered,
@@ -165,28 +218,16 @@ sanitize_files() {
   for f in "$@"; do
     src="${STAGE}/${f}"
     [ -f "$src" ] || continue
-    # No absolute path anywhere to rewrite (everything was passed relative): the file still
-    # has to reach $OUT, it just needs no rewriting.
-    if [ -z "$_scrub_script" ]; then
-      mv -f "$src" "${OUT}/${f}" && continue
-      echo "ERROR: could not move $f into the output dir" >&2
-      rc=1
-      continue
-    fi
-    # Scrubbed output is written next to its destination, so the move into place is an
-    # atomic same-directory rename and the file keeps exactly the mode and group it got
-    # when the scanner wrote straight into $OUT. Only ALREADY-scrubbed bytes are ever
-    # written under $OUT; the name is per-process (the old fixed "${f}.scrub" was not)
-    # and hidden, and the trap removes it on any abort.
-    tmp="${OUT}/.${f}.scrub.$$"
-    _scrub_tmp="$tmp"
-    if sed "$_scrub_script" "$src" > "$tmp" && mv -f "$tmp" "${OUT}/${f}"; then
-      _scrub_tmp=""
+    # The scrubbed copy is written in staging and only moves into $OUT once _verify_scrubbed
+    # has read it back: not one byte reaches the collected directory before it has been
+    # checked, so even a SIGKILL cannot expose a half-scrubbed file there. The name is
+    # per-process (the old fixed "${f}.scrub" was not) and the trap removes all of staging.
+    tmp="${src}.scrub.$$"
+    if sed "$_scrub_script" "$src" > "$tmp" && _verify_scrubbed "$tmp" "$f" && mv -f "$tmp" "${OUT}/${f}"; then
       rm -f "$src"
       continue
     fi
     rm -f "$tmp"
-    _scrub_tmp=""
     rm -f "$src"
     echo "ERROR: could not strip host paths from ${f} - the file was deleted rather than shipped with them" >&2
     rc=1

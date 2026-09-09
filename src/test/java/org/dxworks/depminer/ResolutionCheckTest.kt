@@ -113,6 +113,23 @@ class ResolutionCheckTest {
     }
 
     @Test
+    fun `names the maven cache relative to home rather than by its absolute path`() {
+        val home = Files.createTempDirectory("fake-home").toFile()
+        val emptyM2 = File(home, ".m2/repository").also { it.mkdirs() }
+        val realHome = System.getProperty("user.home")
+        val warning = try {
+            System.setProperty("user.home", home.path)
+            assertNotNull(warningFor("Maven", tree("pom.xml"), emptyM2), "expected a Maven warning")
+        } finally {
+            System.setProperty("user.home", realHome)
+        }
+        // The wrappers rewrite $HOME to "~" in the SBOMs; a warning printed by the same run must
+        // not put the client's absolute layout back into the log.
+        assertTrue(!warning.contains(home.path), warning)
+        assertTrue(warning.contains("~${File.separator}.m2${File.separator}repository"), warning)
+    }
+
+    @Test
     fun `does not warn for maven when there is no pom`() {
         val emptyM2 = Files.createTempDirectory("empty-m2").toFile()
         assertEquals(null, warningFor("Maven", tree("package.json"), emptyM2))
