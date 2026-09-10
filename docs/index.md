@@ -3,11 +3,15 @@
 **DepMiner (DepMi)** mines dependency information from a target folder of repositories.
 As a **Voyager instrument** it runs three tools per mission, side by side:
 
-| Command name (use exactly this in `mission.yml`) | Tool | Output (in `depminer/results/` inside the results zip) |
+| Command name (use exactly this in `mission.yml`) | Tool | Output (under `depminer/results/` inside the results zip) |
 |---|---|---|
-| `Mine Dependencies` | depminer | mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
-| `Syft SBOM` | Syft (bundled) | `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
-| `Trivy Extract` | Trivy (bundled) | `<project>.trivy.cdx.json` per project |
+| `Mine Dependencies` | depminer | `depminer/` — mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
+| `Syft SBOM` | Syft (bundled) | `syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
+| `Trivy Extract` | Trivy (bundled) | `trivy/` — `<project>.trivy.cdx.json` per project |
+
+Each tool owns a subfolder, so asking for "the Syft SBOMs" is a folder, not a guess at a filename
+suffix. The one file at the root of `results/` is `scrub-report.json`, shared by all three: it is
+the single place to look to find out whether anything in the run shipped carrying host data.
 
 Syft and Trivy run **extraction-only and 100% offline**: no vulnerability databases, no
 telemetry, no version checks, no registry or Maven Central lookups. They only read the target
@@ -35,9 +39,13 @@ For every project it finds in the target folder, DepMiner produces the following
 the run's results zip (`<mission>-voyager-results.zip`, under `depminer/results/` — see
 [Quick Start → Find your results](quickstart.md#3-find-your-results)):
 
-- **Mined manifests** — the raw dependency declarations depminer extracts, plus an `index.json`.
-- **Syft SBOMs** — three formats per project: native Syft JSON, CycloneDX (`.cdx.json`), and SPDX.
-- **Trivy SBOM** — CycloneDX per project (`.trivy.cdx.json`).
+- **Mined manifests** (`results/depminer/`) — the raw dependency declarations depminer extracts,
+  plus an `index.json` mapping each copied file back to its path under the target.
+- **Syft SBOMs** (`results/syft/`) — three formats per project: native Syft JSON, CycloneDX
+  (`.cdx.json`), and SPDX.
+- **Trivy SBOM** (`results/trivy/`) — CycloneDX per project (`.trivy.cdx.json`).
+- **`results/scrub-report.json`** — shared by all three, at the root: whether anything emitted
+  still carries host data.
 
 Because Syft and Trivy read your project's **already-resolved** dependency state rather than
 building it, most ecosystems need zero setup. A few (Maven, Gradle, a bare `requirements.txt`)

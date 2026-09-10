@@ -55,11 +55,18 @@ class SyftWrapperScrubTest {
         """.trimIndent()
     )
 
-    /** Runs the wrapper over [target], returning its exit code; PATH is prefixed with [stubs]. */
-    private fun runWrapper(stubs: File, target: File, out: File): Int {
+    /**
+     * Runs the wrapper over [target], returning its exit code; PATH is prefixed with [stubs].
+     * [reportDir] is the wrapper's optional third argument — where the shared scrub-report.json
+     * goes when the three tools write into separate subfolders of results/.
+     */
+    private fun runWrapper(stubs: File, target: File, out: File, reportDir: File? = null): Int {
         val here = tempDir("depminer-wrapper")
         val wrapper = File(here, "syft-wrapper.sh").also { wrapperSource.copyTo(it, overwrite = true) }
-        val process = ProcessBuilder("bash", wrapper.absolutePath, target.absolutePath, out.absolutePath)
+        val argv = listOfNotNull(
+            "bash", wrapper.absolutePath, target.absolutePath, out.absolutePath, reportDir?.absolutePath
+        )
+        val process = ProcessBuilder(argv)
             .redirectErrorStream(true)
             .also { it.environment()["PATH"] = stubs.absolutePath + File.pathSeparator + System.getenv("PATH") }
             .start()
@@ -74,6 +81,79 @@ class SyftWrapperScrubTest {
         out.listFiles().orEmpty().filter { it.isFile && it.name != "scrub-report.json" }
 
     private fun report(out: File): String = File(out, "scrub-report.json").readText()
+
+    @Test
+    fun `clearing the output dir removes only this wrapper's own leftovers`() {
+        // <output-dir> is an argument and the wrapper is documented as runnable standalone, so
+        // clearing it wholesale would empty whatever the caller passed - `syft-wrapper.sh /repos .`
+        // would take the working directory with it.
+        val stubs = tempDir("depminer-stubs")
+        stubSyft(stubs)
+        val target = target()
+        val out = tempDir("depminer-out")
+        File(out, "gone.syft.json").writeText("{}")          // last run's, for a repo since removed
+        File(out, "my-notes.txt").writeText("keep me")       // not ours
+        File(out, "important.json").writeText("keep me")     // not one of our shapes
+        File(out, "other.trivy.cdx.json").writeText("{}")    // the other wrapper's
+        File(out, "sub").mkdirs()
+
+        assertEquals(0, runWrapper(stubs, target, out))
+
+        assertTrue(!File(out, "gone.syft.json").exists(), "this wrapper's leftover survived")
+        assertTrue(File(out, "my-notes.txt").exists(), "deleted an unrelated file")
+        assertTrue(File(out, "important.json").exists(), "deleted an unrelated file")
+        assertTrue(File(out, "other.trivy.cdx.json").exists(), "deleted the other wrapper's output")
+        assertTrue(File(out, "sub").isDirectory, "deleted a subdirectory")
+    }
+
+    @Test
+    fun `the report goes to the shared dir, the sboms to this tool's own subfolder`() {
+        // instrument.yml gives each tool its own subfolder of results/ and passes results/ itself
+        // as the third argument, so that the one scrub report is shared by all three.
+        val stubs = tempDir("depminer-stubs")
+        stubSyft(stubs)
+        val target = target()
+        val results = tempDir("depminer-results")
+        val out = File(results, "syft")
+
+        assertEquals(0, runWrapper(stubs, target, out, results))
+
+        assertTrue(File(results, "scrub-report.json").isFile, "the report is not at the shared root")
+        assertTrue(!File(out, "scrub-report.json").exists(), "the report was also left in the subfolder")
+        assertTrue(emitted(out).any { it.name == "proj.syft.json" }, emitted(out).map { it.name }.toString())
+        assertTrue(
+            results.listFiles().orEmpty().none { it.isFile && it.name.endsWith(".json") && it.name != "scrub-report.json" },
+            "an SBOM was left at the root of results/"
+        )
+    }
+
+    @Test
+    fun `clears its own output dir but keeps the entries the other tools recorded`() {
+        val stubs = tempDir("depminer-stubs")
+        stubSyft(stubs)
+        val target = target()
+        val results = tempDir("depminer-results")
+        val out = File(results, "syft").also { it.mkdirs() }
+        // Left over from an earlier run: a repo that has since been removed from the target.
+        File(out, "gone.syft.json").writeText("{}")
+        // The jar runs first and has already recorded a finding of its own into the shared report.
+        File(results, "scrub-report.json").writeText(
+            """
+            {
+              "schemaVersion": 1,
+              "flagged": [
+                {"timestamp": "2026-01-01T00:00:00Z", "wrapper": "depminer", "project": "p", "file": "project.assets.json", "reason": "emitted-despite-failed-scrub-verification", "matchedRules": ["home"], "matchCount": 1}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(0, runWrapper(stubs, target, out, results))
+
+        assertTrue(!File(out, "gone.syft.json").exists(), "last run's SBOM survived into this one")
+        val report = File(results, "scrub-report.json").readText()
+        assertTrue(report.contains("project.assets.json"), "the jar's entry was dropped: $report")
+    }
 
     @Test
     fun `strips the scanned path and any url credentials out of the sbom`() {

@@ -36,7 +36,7 @@ data class Flagged(
 /** `://user:token@host` in a lockfile's resolved URL. A fixed rule, nothing to mis-escape. */
 private val URL_USERINFO = Regex("://[^/\"\\s]*@")
 
-fun buildHostRules(target: Path, resultsPath: Path, home: String?): List<HostRule> {
+fun buildHostRules(target: Path, outPaths: List<Path>, home: String?): List<HostRule> {
     val rules = mutableListOf<HostRule>()
     fun add(cls: String, dir: File?, replacement: String) {
         if (dir == null) return
@@ -47,11 +47,20 @@ fun buildHostRules(target: Path, resultsPath: Path, home: String?): List<HostRul
     }
     add("target", target.toFile(), ".")
     add("target", runCatching { target.toRealPath().toFile() }.getOrNull(), ".")
-    add("out", resultsPath.toFile(), ".")
-    add("out", runCatching { resultsPath.toRealPath().toFile() }.getOrNull(), ".")
+    // The results dir AND the dir holding scrub-report.json, which since the per-tool split is
+    // its parent: results/depminer is rewritten before results/, because the rules are applied
+    // longest first and the shorter one would otherwise cut the longer one in half.
+    outPaths.forEach {
+        add("out", it.toFile(), ".")
+        add("out", runCatching { it.toRealPath().toFile() }.getOrNull(), ".")
+    }
     if (!home.isNullOrBlank()) add("home", File(home), "~")
     return rules.distinctBy { it.literal }.sortedByDescending { it.literal.length }
 }
+
+/** Single-results-dir form, for callers that do not split the report out. */
+fun buildHostRules(target: Path, resultsPath: Path, home: String?): List<HostRule> =
+    buildHostRules(target, listOf(resultsPath), home)
 
 fun scrubLine(line: String, rules: List<HostRule>): String {
     var out = line
@@ -101,8 +110,8 @@ object ScrubReport {
     /** The shape both sides read back: one entry per line, four-space indent, optional comma. */
     private val ENTRY = Regex("""^ {4}(\{"timestamp".*\}),?$""")
 
-    fun write(resultsPath: Path, flagged: List<Flagged>) {
-        val report = resultsPath.resolve("scrub-report.json").toFile()
+    fun write(reportDir: Path, flagged: List<Flagged>) {
+        val report = reportDir.resolve("scrub-report.json").toFile()
         val now = TS.format(Instant.now())
         val own = flagged.map { f ->
             val rules = f.matchedRules.joinToString(", ") { "\"$it\"" }

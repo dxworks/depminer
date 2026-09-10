@@ -3,11 +3,15 @@
 Depminer mines dependency information from a target folder of repositories. As a
 **Voyager instrument** it runs three tools per mission, side by side:
 
-| Command name (use exactly this in mission.yml) | Tool | Output in `depminer/results/` |
+| Command name (use exactly this in mission.yml) | Tool | Output |
 |---|---|---|
-| `Mine Dependencies` | depminer | mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
-| `Syft SBOM` | Syft (bundled) | `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
-| `Trivy Extract` | Trivy (bundled) | `<project>.trivy.cdx.json` per project |
+| `Mine Dependencies` | depminer | `results/depminer/` — mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
+| `Syft SBOM` | Syft (bundled) | `results/syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
+| `Trivy Extract` | Trivy (bundled) | `results/trivy/` — `<project>.trivy.cdx.json` per project |
+
+Each tool owns a subfolder, so asking for "the Syft SBOMs" is a folder, not a guess at a filename
+suffix. The one file at the root of `results/` is `scrub-report.json`, shared by all three: it is
+the single place to look to find out whether anything in the run shipped carrying host data.
 
 Syft and Trivy run **extraction-only and 100% offline**: no vulnerability databases,
 no telemetry, no version checks, no registry or Maven Central lookups. They only read

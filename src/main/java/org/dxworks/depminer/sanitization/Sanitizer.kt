@@ -40,7 +40,17 @@ class Sanitizer {
      *   STILL EMITTED — nothing is deleted or held back — and recorded in scrub-report.json,
      *   which is the only signal that those bytes are not clean.
      */
-    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>) {
+    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>) =
+        sanitizeFiles(resultsPath, sanitizeFile, hostRules, resultsPath)
+
+    /**
+     * @param reportDir where scrub-report.json is written. As a Voyager instrument this is the
+     *   PARENT of [resultsPath] - depminer, Syft and Trivy each own a subfolder of results/ but
+     *   share one report, so a consumer has a single file to read to learn whether the run
+     *   shipped clean. The three-argument form above passes [resultsPath] itself, which is what
+     *   a standalone run wants.
+     */
+    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>, reportDir: Path) {
         try {
             val sanitizationConfig: SanitizationConfig = yamlMapper.readValue(File(sanitizeFile))
 
@@ -86,7 +96,7 @@ class Sanitizer {
                 }
 
             if (hostRules.isNotEmpty()) {
-                ScrubReport.write(resultsPath, flagged)
+                ScrubReport.write(reportDir, flagged)
                 if (flagged.isNotEmpty()) {
                     println(
                         ">> WARNING: ${flagged.size} of $emittedCount emitted file(s) FAILED scrub " +

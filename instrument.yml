@@ -13,22 +13,28 @@ results:
 # Deliberately NOT defaulted in the environment block below: instrument env overrides
 # the host shell env in Voyager, so pinning "true" here would break ad-hoc
 # `DEPMINER_RUN_X=false ./voyager.sh` usage. Defaults live in the commands/wrappers.
+# Each tool writes into its OWN subfolder of results/ - results/depminer, results/syft,
+# results/trivy - so that a downstream consumer can ask for "the Syft SBOMs" by folder instead
+# of guessing from a filename suffix. The one file that stays at the root of results/ is
+# scrub-report.json: it is shared by design, and a consumer should have a single place to look
+# to find out whether anything in the run shipped carrying host data. The jar takes it as
+# --report-dir, the wrappers as their third argument.
 commands:
   - name: Mine Dependencies
-    win: if /I "%DEPMINER_RUN_MINER%"=="false" (echo depminer disabled - skipping) else (java -jar depminer.jar extract "${repo}" "${instrument}/results")
-    unix: if [ "${DEPMINER_RUN_MINER:-true}" = "false" ]; then echo "depminer disabled - skipping"; else java -jar depminer.jar extract "${repo}" "${instrument}/results"; fi
+    win: if /I "%DEPMINER_RUN_MINER%"=="false" (echo depminer disabled - skipping) else (java -jar depminer.jar extract "${repo}" "${instrument}/results/depminer" "--report-dir=${instrument}/results")
+    unix: if [ "${DEPMINER_RUN_MINER:-true}" = "false" ]; then echo "depminer disabled - skipping"; else java -jar depminer.jar extract "${repo}" "${instrument}/results/depminer" "--report-dir=${instrument}/results"; fi
 
   # Syft and Trivy run EXTRACTION-ONLY and 100% OFFLINE: SBOM inventories only,
   # no vulnerability DBs, no network calls of any kind.
   # run is "once", so ${repo} is the target folder holding all repositories;
   # the wrappers loop over each project inside it and write per-project SBOMs.
   - name: Syft SBOM
-    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/syft-wrapper.ps1" "${repo}" "${instrument}/results"
-    unix: bash "${instrument}/bin/syft-wrapper.sh" "${repo}" "${instrument}/results"
+    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/syft-wrapper.ps1" "${repo}" "${instrument}/results/syft" "${instrument}/results"
+    unix: bash "${instrument}/bin/syft-wrapper.sh" "${repo}" "${instrument}/results/syft" "${instrument}/results"
 
   - name: Trivy Extract
-    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/trivy-wrapper.ps1" "${repo}" "${instrument}/results"
-    unix: bash "${instrument}/bin/trivy-wrapper.sh" "${repo}" "${instrument}/results"
+    win: powershell -ExecutionPolicy Bypass -File "${instrument}/bin/trivy-wrapper.ps1" "${repo}" "${instrument}/results/trivy" "${instrument}/results"
+    unix: bash "${instrument}/bin/trivy-wrapper.sh" "${repo}" "${instrument}/results/trivy" "${instrument}/results"
 
 environment:
   # Close every Syft network touchpoint. Env vars beat any stray .syft.yaml on the host.

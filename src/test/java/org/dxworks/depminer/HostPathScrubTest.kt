@@ -89,6 +89,27 @@ class HostPathScrubTest {
     }
 
     @Test
+    fun `the report goes to the shared dir while the jar's files stay in its own`(@TempDir tmp: Path) {
+        // instrument.yml runs the jar with results/depminer as its output and --report-dir=results,
+        // so the one scrub report sits beside the three tool folders rather than inside one of them.
+        val target = tmp.resolve("scan-target").also { it.toFile().mkdirs() }
+        val results = tmp.resolve("results").also { it.toFile().mkdirs() }
+        val out = results.resolve("depminer").also { it.toFile().mkdirs() }
+        out.resolve("index.json").toFile().writeText("""{"pkg.json":"dotnet-app/src/pkg.json"}""")
+        out.resolve("pkg.json").toFile().writeText("""{"folder":"/Users/someone/.nuget/packages/"}""")
+        val sanitizeYml = File(tmp.toFile(), "sanitize.yml").apply { writeText("patterns: []\n") }
+
+        Sanitizer().sanitizeFiles(out, sanitizeYml.path, buildHostRules(target, listOf(out, results), "/Users/someone"), results)
+
+        assertTrue(results.resolve("scrub-report.json").toFile().isFile, "the report is not at the shared root")
+        assertFalse(out.resolve("scrub-report.json").toFile().exists(), "the report was left in the subfolder")
+        // The file itself still shipped, scrubbed, from the jar's own folder.
+        val text = out.resolve("pkg.json").toFile().readText()
+        assertTrue(text.contains("~/.nuget/packages/"), text)
+        assertFalse(text.contains("/Users/someone"), text)
+    }
+
+    @Test
     fun `entries from the wrappers survive a jar write, its own previous ones do not`(@TempDir tmp: Path) {
         // The wrappers rebuild this same file (bin/syft-wrapper.sh, _report_write) and the jar
         // runs first, but it is also runnable on its own against a results dir they already wrote.
@@ -143,5 +164,60 @@ class HostPathScrubTest {
         assertTrue(report.exists(), "the report must be written even when nothing was flagged")
         assertTrue(report.readText().contains("\"flagged\""))
         assertNull(verifyScrubbed(results.resolve("pkg.json").toFile(), rules(target, results)))
+    }
+}
+
+/**
+ * The jar is the first of the three commands (instrument.yml), so it is the one that starts the
+ * run's shared output clean. Each tool clears its own subfolder of results/; nothing else clears
+ * the root, where the shared scrub-report.json lives.
+ */
+class SharedRootTest {
+
+    @Test
+    fun `the root of results is cleared, the tool subfolders are left alone`(@TempDir tmp: Path) {
+        val results = tmp.resolve("results").also { it.toFile().mkdirs() }
+        val out = results.resolve("depminer").also { it.toFile().mkdirs() }
+        // What a pre-split run left behind: a flat SBOM and an index at the root, plus a report
+        // still declaring that run clean.
+        results.resolve("proj.syft.json").toFile().writeText("{}")
+        results.resolve("index.json").toFile().writeText("{}")
+        results.resolve("scrub-report.json").toFile().writeText("""{"flagged": []}""")
+        results.resolve("syft").toFile().mkdirs()
+        results.resolve("syft").resolve("keep.syft.json").toFile().writeText("{}")
+
+        clearSharedRoot(out, results)
+
+        assertFalse(results.resolve("proj.syft.json").toFile().exists(), "a stale SBOM shipped")
+        assertFalse(results.resolve("index.json").toFile().exists(), "a stale index shipped")
+        assertFalse(results.resolve("scrub-report.json").toFile().exists(), "a stale report shipped")
+        // Another tool's folder is its own to clear, and so is its content.
+        assertTrue(results.resolve("syft").resolve("keep.syft.json").toFile().isFile)
+    }
+
+    @Test
+    fun `nothing is cleared unless the results dir sits directly inside the report dir`(@TempDir tmp: Path) {
+        // The guard that keeps this from deleting files in whatever an unrelated --report-dir
+        // happens to point at - a home directory, say.
+        val elsewhere = tmp.resolve("elsewhere").also { it.toFile().mkdirs() }
+        val out = tmp.resolve("out").also { it.toFile().mkdirs() }
+        elsewhere.resolve("notes.txt").toFile().writeText("keep me")
+
+        clearSharedRoot(out, elsewhere)
+        assertTrue(elsewhere.resolve("notes.txt").toFile().isFile, "deleted an unrelated file")
+
+        // Same dir: the standalone shape, where the report sits beside the output.
+        out.resolve("scrub-report.json").toFile().writeText("{}")
+        clearSharedRoot(out, out)
+        assertTrue(out.resolve("scrub-report.json").toFile().isFile, "cleared its own output dir")
+    }
+
+    @Test
+    fun `a target folder named no-sanitize does not switch scrubbing off`() {
+        // A fail-open switch on the control that keeps a client's paths out of the results, so it
+        // reads only the arguments meant for it - not the command, and not the target.
+        assertTrue(sanitizeByDefault(arrayOf("extract", "no-sanitize")))
+        assertTrue(sanitizeByDefault(arrayOf("extract", "/repos", "results")))
+        assertFalse(sanitizeByDefault(arrayOf("extract", "/repos", "results", "no-sanitize")))
     }
 }

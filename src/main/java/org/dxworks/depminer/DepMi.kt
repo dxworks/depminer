@@ -69,7 +69,14 @@ fun main(args: Array<String>) {
         println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
         exitProcess(1)
     }
-    val depminerResultsPath = if (args.size >= 3) Paths.get(args[2]) else Paths.get("results")
+    // Positional args only; the flags (no-sanitize, --report-dir=...) may sit anywhere after them.
+    // A single leading "-" is enough: argumenthor's ArgsSource takes its options as -name=value
+    // (one dash), so "--" alone would let -sanitize.file=x.yml through as the results dir - and
+    // the results dir is deleted recursively below.
+    val depminerResultsPath =
+        args.drop(2).firstOrNull { !it.startsWith("-") && !it.equals("no-sanitize", ignoreCase = true) }
+            ?.let { Paths.get(it) } ?: Paths.get("results")
+    val scrubReportPath = reportDirArg(args)?.let { Paths.get(it) } ?: depminerResultsPath
 
     when (command) {
         "extract" -> {
@@ -78,7 +85,9 @@ fun main(args: Array<String>) {
             }
             depminerResultsPath.toFile().mkdirs()
             val sanitize = sanitizeByDefault(args)
-            extract(argumenthor, targetPath, depminerResultsPath, sanitize)
+            scrubReportPath.toFile().mkdirs()
+            clearSharedRoot(depminerResultsPath, scrubReportPath)
+            extract(argumenthor, targetPath, depminerResultsPath, scrubReportPath, sanitize)
         }
 
         "construct" -> {
@@ -102,13 +111,50 @@ fun main(args: Array<String>) {
 
 }
 
-private fun sanitizeByDefault(args: Array<String>): Boolean =
-    !(args.size >= 4 && args[3].equals("no-sanitize", ignoreCase = true))
+// Skips the command and the target, so a folder that happens to be named "no-sanitize" cannot
+// switch host-path scrubbing off. This is a fail-OPEN switch on the control that exists to keep
+// a client's paths out of the results, so it only ever reads the arguments meant for it.
+/**
+ * Clears the files sitting at the root of the shared results dir, the jar's own output folder
+ * being one level down inside it.
+ *
+ * Each of the three tools clears its own subfolder, and nothing else clears this level - so
+ * without this, whatever an earlier run left at the root would ship untouched: a flat SBOM from
+ * before the per-tool split, or a stale scrub-report.json still declaring that run clean. Before
+ * the split the jar deleted results/ wholesale and this came for free; it is the same job, and
+ * the jar still holds it because instrument.yml runs it first.
+ *
+ * Only regular files, so the tool subfolders are left to their owners. And only when the results
+ * dir is a DIRECT CHILD of the report dir, which is what the instrument layout looks like: it is
+ * the difference between clearing results/ and deleting files in whatever an unrelated
+ * --report-dir happens to point at.
+ */
+internal fun clearSharedRoot(resultsPath: Path, reportDir: Path) {
+    val results = resultsPath.toAbsolutePath().normalize()
+    val report = reportDir.toAbsolutePath().normalize()
+    if (results == report || results.parent != report) return
+    report.toFile().listFiles()?.filter { it.isFile }?.forEach { it.delete() }
+}
+
+internal fun sanitizeByDefault(args: Array<String>): Boolean =
+    args.drop(2).none { it.equals("no-sanitize", ignoreCase = true) }
+
+/**
+ * `--report-dir=<path>` - where scrub-report.json goes, when that is not the results dir.
+ *
+ * Each tool now writes into its own subfolder (results/depminer, results/syft, results/trivy)
+ * but the scrub report stays ONE file at the root of results/, so a consumer has a single place
+ * to look to find out whether anything in the run shipped unclean. The wrappers take the same
+ * path as their third argument; see instrument.yml.
+ */
+private fun reportDirArg(args: Array<String>): String? =
+    args.firstOrNull { it.startsWith("--report-dir=") }?.substringAfter("=")?.takeIf { it.isNotBlank() }
 
 private fun extract(
     argumenthor: Argumenthor,
     target: Path,
     depminerResultsPath: Path,
+    scrubReportPath: Path,
     sanitize: Boolean
 ) {
 
@@ -171,7 +217,8 @@ private fun extract(
             // emitted bytes and record anything still carrying them in scrub-report.json.
             Sanitizer().sanitizeFiles(
                 depminerResultsPath, sanitizeFile,
-                buildHostRules(target, depminerResultsPath, System.getenv("HOME"))
+                buildHostRules(target, listOf(depminerResultsPath, scrubReportPath), System.getenv("HOME")),
+                scrubReportPath
             )
         } else {
             println("Sanitization file path is null, skipping sanitization")

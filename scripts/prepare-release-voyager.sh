@@ -55,7 +55,7 @@ fetch_verified() {
 # in a leftover staging dir would otherwise survive local re-runs.
 rm -rf depminer depminer-voyager.zip
 
-mkdir -p depminer/results depminer/bin
+mkdir -p depminer/results/depminer depminer/results/syft depminer/results/trivy depminer/bin
 cp README.md depminer/README.md
 cp PREP_GUIDE.md depminer/PREP_GUIDE.md
 cp target/depminer.jar depminer/depminer.jar
