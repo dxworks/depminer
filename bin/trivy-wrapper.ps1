@@ -5,11 +5,17 @@
     updates are all forced off. No network call is ever attempted.
     The instrument runs "once", so <target-path> holds all repositories: each
     subdirectory is scanned as its own project; if there are none, the target itself is.
-    Usage: trivy-wrapper.ps1 <target-path> <output-dir>
+    Usage: trivy-wrapper.ps1 <target-path> <output-dir> [report-dir]
+    <output-dir> is this tool's own subfolder of results/ (see instrument.yml);
+    [report-dir] is where the shared scrub-report.json goes, and defaults to <output-dir>.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Target,
-    [Parameter(Mandatory = $true)][string]$Out
+    [Parameter(Mandatory = $true)][string]$Out,
+    # All three producers write into their own subfolder but share ONE scrub report, so that a
+    # consumer has a single file to read to learn whether anything in the run shipped unclean.
+    # Defaults to $Out, which is what a standalone run wants.
+    [Parameter(Mandatory = $false)][string]$ReportDir = ""
 )
 $ErrorActionPreference = "Stop"
 
@@ -31,6 +37,17 @@ if (-not (Test-Path $bin)) {
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$reportRoot = if ([string]::IsNullOrWhiteSpace($ReportDir)) { $Out } else { $ReportDir }
+New-Item -ItemType Directory -Force -Path $reportRoot | Out-Null
+# Each producer owns its output dir and clears it, the way the jar clears results/depminer
+# (DepMi.kt). Before the per-tool split the jar's wipe of results/ cleaned up after these
+# wrappers too; now nothing else does, and two runs into the same install would blend - last
+# run's SBOM for a repo since removed from the target sitting beside this run's. Only files
+# directly in $Out, which is all this wrapper ever writes there, and never the shared report:
+# another producer may already have written into it.
+Get-ChildItem -LiteralPath $Out -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne "scrub-report.json" } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 Write-Host ">> trivy: $bin"
 
@@ -101,19 +118,29 @@ function Add-ScrubRule([System.Collections.ArrayList]$rules, [string]$class, [st
 # "there was nothing to scan" and "this file shipped with host data in it" can be told apart
 # without reading the log. The array is called "flagged", not "withheld": nothing was.
 # The leaked VALUE never goes into the report: that would only copy the leak into a new file.
-$script:report = Join-Path $Out "scrub-report.json"
+$script:wrapperName = "trivy"
+$script:report = Join-Path $reportRoot "scrub-report.json"
+# This run's own entries, kept whole: Write-ScrubReport drops this wrapper's previous
+# entries from the file and restates them from here, so a rerun replaces them instead of
+# stacking a second copy onto the first.
+$script:ownEntries = @()
 $script:flagged = 0
 $script:emitted = 0
 
 function Write-ScrubReport([object[]]$entries) {
+    if ($entries) { $script:ownEntries += $entries }
+    # Entries from the OTHER producers - the jar and the other wrapper - are carried over
+    # verbatim; this wrapper's own are dropped and restated from $script:ownEntries.
     $existing = @()
     if (Test-Path -LiteralPath $script:report) {
         try {
             $parsed = Get-Content -LiteralPath $script:report -Raw | ConvertFrom-Json
-            if ($parsed.flagged) { $existing = @($parsed.flagged) }
+            if ($parsed.flagged) {
+                $existing = @($parsed.flagged) | Where-Object { $_.wrapper -ne $script:wrapperName }
+            }
         } catch { $existing = @() }
     }
-    $all = @($existing) + @($entries)
+    $all = @($existing) + @($script:ownEntries)
     $doc = [ordered]@{ schemaVersion = 1; flagged = $all }
     ($doc | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $script:report -Encoding utf8
 }
@@ -123,7 +150,7 @@ function Add-Flagged([string]$project, [string]$file, [string[]]$classes, [int]$
         "still carries host data ($count occurrence(s), rules: $($classes -join ', ')) - see $(Split-Path -Leaf $script:report)")
     Write-ScrubReport @([ordered]@{
         timestamp     = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-        wrapper       = "trivy"
+        wrapper       = $script:wrapperName
         project       = $project
         file          = $file
         reason        = "emitted-despite-failed-scrub-verification"
@@ -157,6 +184,12 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
     Add-ScrubRule $rules "staging" (Get-AbsPathOrEmpty $stage) "."
     Add-ScrubRule $rules "out" $Out "."
     Add-ScrubRule $rules "out" (Get-AbsPathOrEmpty $Out) "."
+    # $Out's parent since the split, and added AFTER it so the longer path is rewritten first:
+    # the shorter rule would otherwise cut the longer one in half and leave the tail behind.
+    if ($reportRoot -ne $Out) {
+        Add-ScrubRule $rules "out" $reportRoot "."
+        Add-ScrubRule $rules "out" (Get-AbsPathOrEmpty $reportRoot) "."
+    }
     Add-ScrubRule $rules "home" $HOME "~"
     # NOTHING IS EVER DELETED OR HELD BACK - the same rule the unix twin follows. A file whose
     # verification fails is emitted anyway, in its best-effort scrubbed form, and the report is

@@ -89,6 +89,27 @@ class HostPathScrubTest {
     }
 
     @Test
+    fun `the report goes to the shared dir while the jar's files stay in its own`(@TempDir tmp: Path) {
+        // instrument.yml runs the jar with results/depminer as its output and --report-dir=results,
+        // so the one scrub report sits beside the three tool folders rather than inside one of them.
+        val target = tmp.resolve("scan-target").also { it.toFile().mkdirs() }
+        val results = tmp.resolve("results").also { it.toFile().mkdirs() }
+        val out = results.resolve("depminer").also { it.toFile().mkdirs() }
+        out.resolve("index.json").toFile().writeText("""{"pkg.json":"dotnet-app/src/pkg.json"}""")
+        out.resolve("pkg.json").toFile().writeText("""{"folder":"/Users/someone/.nuget/packages/"}""")
+        val sanitizeYml = File(tmp.toFile(), "sanitize.yml").apply { writeText("patterns: []\n") }
+
+        Sanitizer().sanitizeFiles(out, sanitizeYml.path, buildHostRules(target, listOf(out, results), "/Users/someone"), results)
+
+        assertTrue(results.resolve("scrub-report.json").toFile().isFile, "the report is not at the shared root")
+        assertFalse(out.resolve("scrub-report.json").toFile().exists(), "the report was left in the subfolder")
+        // The file itself still shipped, scrubbed, from the jar's own folder.
+        val text = out.resolve("pkg.json").toFile().readText()
+        assertTrue(text.contains("~/.nuget/packages/"), text)
+        assertFalse(text.contains("/Users/someone"), text)
+    }
+
+    @Test
     fun `entries from the wrappers survive a jar write, its own previous ones do not`(@TempDir tmp: Path) {
         // The wrappers rebuild this same file (bin/syft-wrapper.sh, _report_write) and the jar
         // runs first, but it is also runnable on its own against a results dir they already wrote.

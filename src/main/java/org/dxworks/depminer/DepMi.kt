@@ -69,7 +69,11 @@ fun main(args: Array<String>) {
         println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
         exitProcess(1)
     }
-    val depminerResultsPath = if (args.size >= 3) Paths.get(args[2]) else Paths.get("results")
+    // Positional args only; the flags (no-sanitize, --report-dir=...) may sit anywhere after them.
+    val depminerResultsPath =
+        args.drop(2).firstOrNull { !it.startsWith("--") && !it.equals("no-sanitize", ignoreCase = true) }
+            ?.let { Paths.get(it) } ?: Paths.get("results")
+    val scrubReportPath = reportDirArg(args)?.let { Paths.get(it) } ?: depminerResultsPath
 
     when (command) {
         "extract" -> {
@@ -78,7 +82,8 @@ fun main(args: Array<String>) {
             }
             depminerResultsPath.toFile().mkdirs()
             val sanitize = sanitizeByDefault(args)
-            extract(argumenthor, targetPath, depminerResultsPath, sanitize)
+            scrubReportPath.toFile().mkdirs()
+            extract(argumenthor, targetPath, depminerResultsPath, scrubReportPath, sanitize)
         }
 
         "construct" -> {
@@ -103,12 +108,24 @@ fun main(args: Array<String>) {
 }
 
 private fun sanitizeByDefault(args: Array<String>): Boolean =
-    !(args.size >= 4 && args[3].equals("no-sanitize", ignoreCase = true))
+    args.none { it.equals("no-sanitize", ignoreCase = true) }
+
+/**
+ * `--report-dir=<path>` - where scrub-report.json goes, when that is not the results dir.
+ *
+ * Each tool now writes into its own subfolder (results/depminer, results/syft, results/trivy)
+ * but the scrub report stays ONE file at the root of results/, so a consumer has a single place
+ * to look to find out whether anything in the run shipped unclean. The wrappers take the same
+ * path as their third argument; see instrument.yml.
+ */
+private fun reportDirArg(args: Array<String>): String? =
+    args.firstOrNull { it.startsWith("--report-dir=") }?.substringAfter("=")?.takeIf { it.isNotBlank() }
 
 private fun extract(
     argumenthor: Argumenthor,
     target: Path,
     depminerResultsPath: Path,
+    scrubReportPath: Path,
     sanitize: Boolean
 ) {
 
@@ -171,7 +188,8 @@ private fun extract(
             // emitted bytes and record anything still carrying them in scrub-report.json.
             Sanitizer().sanitizeFiles(
                 depminerResultsPath, sanitizeFile,
-                buildHostRules(target, depminerResultsPath, System.getenv("HOME"))
+                buildHostRules(target, listOf(depminerResultsPath, scrubReportPath), System.getenv("HOME")),
+                scrubReportPath
             )
         } else {
             println("Sanitization file path is null, skipping sanitization")

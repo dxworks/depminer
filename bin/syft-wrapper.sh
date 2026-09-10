@@ -5,11 +5,17 @@
 # safe when run standalone outside Voyager).
 # The instrument runs "once", so <target-path> holds all repositories: each immediate
 # subdirectory is scanned as its own project; if there are none, the target itself is.
-# Usage: syft-wrapper.sh <target-path> <output-dir>
+# Usage: syft-wrapper.sh <target-path> <output-dir> [report-dir]
+# <output-dir> is this tool's own subfolder of results/ (see instrument.yml); [report-dir]
+# is where the shared scrub-report.json goes, and defaults to <output-dir>.
 set -euo pipefail
 
 TARGET="${1:?target path required}"
 OUT="${2:?output dir required}"
+# All three producers write into their own subfolder but share ONE scrub report, so that
+# a consumer has a single file to read to learn whether anything in the run shipped
+# unclean. Defaults to $OUT, which is what a standalone run wants.
+REPORT_DIR="${3:-$OUT}"
 
 # Tool switch: ON unless explicitly disabled (see instrument.yml / README)
 if [ "${DEPMINER_RUN_SYFT:-true}" = "false" ]; then
@@ -63,11 +69,19 @@ if [[ ! -x "$BIN" ]]; then
   fi
 fi
 
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$REPORT_DIR"
+# Each producer owns its output dir and clears it, the way the jar clears results/depminer
+# (DepMi.kt). Before the per-tool split the jar's wipe of results/ cleaned up after these
+# wrappers too; now nothing else does, and two runs into the same install would blend -
+# last run's SBOM for a repo since removed from the target sitting beside this run's.
+# Only regular files directly in $OUT, which is all this wrapper ever writes there, and
+# never the shared report: another producer may already have written into it.
+find "$OUT" -maxdepth 1 -type f ! -name scrub-report.json -delete 2>/dev/null || true
 echo ">> syft: $BIN"
 
 TARGET_ABS="$(cd "$TARGET" 2>/dev/null && pwd || true)"
 OUT_ABS="$(cd "$OUT" 2>/dev/null && pwd || true)"
+REPORT_DIR_ABS="$(cd "$REPORT_DIR" 2>/dev/null && pwd || true)"
 
 # --- Staging -------------------------------------------------------------------
 # Syft writes HERE, never straight into $OUT: a file reaches $OUT only after its
@@ -112,7 +126,7 @@ _CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
 #
 # The leaked VALUE is never written to the report: that would just copy the leak into a new
 # file. Only which rule class matched, and how many times.
-REPORT="${OUT}/scrub-report.json"
+REPORT="${REPORT_DIR}/scrub-report.json"
 _flagged=0
 _emitted=0
 _report_entries=""
@@ -127,13 +141,19 @@ _report_add() {
 }
 
 # Rewrites the report from the entries already on disk plus the ones this run has added, so
-# that the syft and trivy wrappers accumulate into the one file. Called after every failure
+# that the jar and the two wrappers accumulate into the one file. Called after every failure
 # as well as at the end, so a hard kill cannot lose what was already recorded.
+#
+# What is carried over is every entry from the OTHER producers, verbatim. This wrapper's own
+# previous entries are dropped and restated from $_report_entries, which is why that variable
+# holds the whole run and is never cleared: a rerun then replaces its own entries instead of
+# stacking a second copy of them onto the first.
 _report_write() {
   local old all line first
   old=""
   if [ -f "$REPORT" ]; then
-    old="$(sed -n 's/^    \({"timestamp".*}\),\{0,1\}$/\1/p' "$REPORT")"
+    old="$(sed -n 's/^    \({"timestamp".*}\),\{0,1\}$/\1/p' "$REPORT" \
+           | grep -v "\"wrapper\": \"${WRAPPER}\"" || true)"
   fi
   all="$(printf '%s\n%s' "$old" "$_report_entries" | grep '^{"timestamp"' || true)"
   {
@@ -145,7 +165,7 @@ _report_write() {
       printf '    %s' "$line"
     done
     printf '\n  ]\n}\n'
-  } > "${REPORT}.tmp.$$" && mv -f "${REPORT}.tmp.$$" "$REPORT" && _report_entries=""
+  } > "${REPORT}.tmp.$$" && mv -f "${REPORT}.tmp.$$" "$REPORT"
 }
 
 # --- Host-path scrubbing -------------------------------------------------------
@@ -277,6 +297,12 @@ sanitize_files() {
   if [ -n "$STAGE_ABS" ] && [ "$STAGE_ABS" != "$STAGE" ]; then _rule staging "$STAGE_ABS" "."; fi
   _rule out "$OUT" "."
   if [ -n "$OUT_ABS" ] && [ "$OUT_ABS" != "${OUT%/}" ]; then _rule out "$OUT_ABS" "."; fi
+  # $OUT's parent since the split, and added AFTER it so the longer path is rewritten first:
+  # the shorter rule would otherwise cut the longer one in half and leave the tail behind.
+  if [ "${REPORT_DIR%/}" != "${OUT%/}" ]; then
+    _rule out "$REPORT_DIR" "."
+    if [ -n "$REPORT_DIR_ABS" ] && [ "$REPORT_DIR_ABS" != "${REPORT_DIR%/}" ]; then _rule out "$REPORT_DIR_ABS" "."; fi
+  fi
   _rule home "${HOME:-}" "~"
   # The rules could not even be built, so nothing can be rewritten: the files are emitted
   # unscrubbed, and every one of them is flagged.

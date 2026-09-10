@@ -12,7 +12,10 @@ The tool is also packaged as a [Voyager](https://github.com/dxworks/voyager) ins
 - **Build tool:** Maven (wrapper included: `./mvnw`)
 - **Build:** `./mvnw clean package`
 - **Output:** `target/depminer.jar` (fat JAR with all dependencies)
-- **Run:** `java -jar target/depminer.jar extract /path/to/project [results-dir] [no-sanitize]`
+- **Run:** `java -jar target/depminer.jar extract /path/to/project [results-dir] [no-sanitize] [--report-dir=<dir>]`
+  `--report-dir` places `scrub-report.json` outside the results dir; as a Voyager instrument
+  each tool writes into its own subfolder (`results/depminer`, `results/syft`,
+  `results/trivy`) and the report is shared at `results/`. It defaults to the results dir.
 - **Main class:** `org.dxworks.depminer.DepMiKt`
 
 ### Commands

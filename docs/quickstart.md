@@ -69,13 +69,29 @@ filename — a file called `my-mission.yml` declaring `mission: my-analysis` sti
     normal — the zip is the deliverable. The last lines of the run log confirm it:
     `Results written to <mission>-voyager-results.zip`.
 
-Unzip it and you get a `depminer/results/` directory containing:
+Unzip it and you get a `depminer/results/` directory with one subfolder per tool:
 
-| File | Produced by |
+```
+depminer/results/
+  scrub-report.json                 <- shared by all three; see below
+  depminer/  pom-*.xml, package-*.json, … + index.json
+  syft/      <project>.syft.json, <project>.cdx.json, <project>.spdx.json
+  trivy/     <project>.trivy.cdx.json
+```
+
+| Folder | Produced by |
 |---|---|
-| `pom-*.xml`, `package-*.json`, … + `index.json` | depminer |
-| `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` | Syft |
-| `<project>.trivy.cdx.json` | Trivy |
+| `depminer/` | depminer |
+| `syft/` | Syft |
+| `trivy/` | Trivy |
+
+`scrub-report.json` stays at the root because all three write into it: it is the single place to
+look to find out whether any of the emitted files shipped carrying host data. An empty `flagged`
+list means everything verified clean — and it is written on every run, so an absent file means the
+instrument never got that far.
+
+Provenance of the mined manifests is in `depminer/index.json`, which maps each copied file to its
+path under the target — that is how you tell which repo a `package-52.json` came from.
 
 The zip also contains `mission-report.log` (the per-command SUCCESS/FAILED summary), `depminer.log`,
 and a copy of the mission file you ran.
