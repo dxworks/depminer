@@ -87,8 +87,8 @@ depminer/results/
 
 `scrub-report.json` stays at the root because all three write into it: it is the single place to
 look to find out whether any of the emitted files shipped carrying host data. An empty `flagged`
-list means everything verified clean — and it is written on every run, so an absent file means the
-instrument never got that far.
+list means everything verified clean, and every tool that runs writes it — so an absent file means
+no tool got that far.
 
 Provenance of the mined manifests is in `depminer/index.json`, which maps each copied file to its
 path under the target — that is how you tell which repo a `package-52.json` came from.

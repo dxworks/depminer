@@ -83,6 +83,30 @@ class SyftWrapperScrubTest {
     private fun report(out: File): String = File(out, "scrub-report.json").readText()
 
     @Test
+    fun `clearing the output dir removes only this wrapper's own leftovers`() {
+        // <output-dir> is an argument and the wrapper is documented as runnable standalone, so
+        // clearing it wholesale would empty whatever the caller passed - `syft-wrapper.sh /repos .`
+        // would take the working directory with it.
+        val stubs = tempDir("depminer-stubs")
+        stubSyft(stubs)
+        val target = target()
+        val out = tempDir("depminer-out")
+        File(out, "gone.syft.json").writeText("{}")          // last run's, for a repo since removed
+        File(out, "my-notes.txt").writeText("keep me")       // not ours
+        File(out, "important.json").writeText("keep me")     // not one of our shapes
+        File(out, "other.trivy.cdx.json").writeText("{}")    // the other wrapper's
+        File(out, "sub").mkdirs()
+
+        assertEquals(0, runWrapper(stubs, target, out))
+
+        assertTrue(!File(out, "gone.syft.json").exists(), "this wrapper's leftover survived")
+        assertTrue(File(out, "my-notes.txt").exists(), "deleted an unrelated file")
+        assertTrue(File(out, "important.json").exists(), "deleted an unrelated file")
+        assertTrue(File(out, "other.trivy.cdx.json").exists(), "deleted the other wrapper's output")
+        assertTrue(File(out, "sub").isDirectory, "deleted a subdirectory")
+    }
+
+    @Test
     fun `the report goes to the shared dir, the sboms to this tool's own subfolder`() {
         // instrument.yml gives each tool its own subfolder of results/ and passes results/ itself
         // as the third argument, so that the one scrub report is shared by all three.

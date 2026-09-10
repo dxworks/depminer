@@ -44,9 +44,11 @@ class Sanitizer {
         sanitizeFiles(resultsPath, sanitizeFile, hostRules, resultsPath)
 
     /**
-     * @param reportDir where scrub-report.json is written. Since the per-tool output split it is
-     *   the PARENT of [resultsPath]: depminer, Syft and Trivy each own a subfolder but share one
-     *   report, so a consumer has a single file to read to learn whether the run shipped clean.
+     * @param reportDir where scrub-report.json is written. As a Voyager instrument this is the
+     *   PARENT of [resultsPath] - depminer, Syft and Trivy each own a subfolder of results/ but
+     *   share one report, so a consumer has a single file to read to learn whether the run
+     *   shipped clean. The three-argument form above passes [resultsPath] itself, which is what
+     *   a standalone run wants.
      */
     fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>, reportDir: Path) {
         try {

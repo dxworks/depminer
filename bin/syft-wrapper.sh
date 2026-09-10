@@ -8,6 +8,8 @@
 # Usage: syft-wrapper.sh <target-path> <output-dir> [report-dir]
 # <output-dir> is this tool's own subfolder of results/ (see instrument.yml); [report-dir]
 # is where the shared scrub-report.json goes, and defaults to <output-dir>.
+# NOTE: this DELETES its own leftovers from <output-dir> first (*.syft.json, *.cdx.json, *.spdx.json, *.syft.err.log),
+# so that two runs cannot blend. Nothing else in that directory is touched.
 set -euo pipefail
 
 TARGET="${1:?target path required}"
@@ -70,13 +72,19 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 mkdir -p "$OUT" "$REPORT_DIR"
-# Each producer owns its output dir and clears it, the way the jar clears results/depminer
-# (DepMi.kt). Before the per-tool split the jar's wipe of results/ cleaned up after these
-# wrappers too; now nothing else does, and two runs into the same install would blend -
-# last run's SBOM for a repo since removed from the target sitting beside this run's.
-# Only regular files directly in $OUT, which is all this wrapper ever writes there, and
-# never the shared report: another producer may already have written into it.
-find "$OUT" -maxdepth 1 -type f ! -name scrub-report.json -delete 2>/dev/null || true
+# Before the per-tool split the jar's wipe of results/ cleaned up after these wrappers too;
+# now nothing else does, and two runs into the same install would blend - last run's SBOM for
+# a repo since removed from the target sitting beside this run's.
+#
+# What is removed is ONLY this wrapper's own output shapes, never "every file": <output-dir> is
+# an argument, the wrapper is documented as runnable standalone, and a plain `-delete` there
+# empties whatever the caller passed - `syft-wrapper.sh /repos .` would clear the working dir.
+# Naming the shapes also spares the shared report and Trivy's files if someone does point both
+# wrappers at one directory. Trailing slash so a symlinked <output-dir> is descended into
+# rather than silently skipped.
+find "$OUT/" -maxdepth 1 -type f \
+  \( -name '*.syft.json' -o -name '*.cdx.json' -o -name '*.spdx.json' -o -name '*.syft.err.log' \) \
+  ! -name '*.trivy.*' -delete 2>/dev/null || true
 echo ">> syft: $BIN"
 
 TARGET_ABS="$(cd "$TARGET" 2>/dev/null && pwd || true)"
@@ -118,7 +126,7 @@ _CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
 # A file that still carries a host path after scrubbing IS STILL EMITTED - Alex's call. Nothing
 # is deleted, held back or renamed, and the run carries on and exits on the scanner's own
 # result. The consequence is stated plainly because it is the whole point of this file: those
-# bytes ship, and ${OUT}/scrub-report.json is the ONLY record that they are not clean.
+# bytes ship, and ${REPORT_DIR}/scrub-report.json is the ONLY record that they are not clean.
 #
 # It is written on EVERY run - with an empty "flagged" list when everything verified - so that
 # "there was nothing to scan" and "this file shipped with host data in it" can be told apart
