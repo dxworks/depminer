@@ -98,17 +98,33 @@ object ScrubReport {
     private val TS: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC)
 
+    /** The shape both sides read back: one entry per line, four-space indent, optional comma. */
+    private val ENTRY = Regex("""^ {4}(\{"timestamp".*\}),?$""")
+
     fun write(resultsPath: Path, flagged: List<Flagged>) {
         val report = resultsPath.resolve("scrub-report.json").toFile()
         val now = TS.format(Instant.now())
-        val entries = flagged.joinToString(",\n") { f ->
+        val own = flagged.map { f ->
             val rules = f.matchedRules.joinToString(", ") { "\"$it\"" }
-            """    {"timestamp": "$now", "wrapper": "depminer", "project": "${esc(f.project)}", """ +
+            """{"timestamp": "$now", "wrapper": "depminer", "project": "${esc(f.project)}", """ +
                 """"file": "${esc(f.file)}", "reason": "emitted-despite-failed-scrub-verification", """ +
                 """"matchedRules": [$rules], "matchCount": ${f.matchCount}}"""
         }
+        // The wrappers accumulate into this one file (see _report_write in bin/syft-wrapper.sh),
+        // so overwriting it would silently drop whatever they had already recorded. The jar
+        // normally runs first and finds nothing, but it is also runnable on its own against a
+        // populated results dir. Entries from the other producers are carried over verbatim; the
+        // jar's own previous entries are not, so a rerun restates this run rather than stacking
+        // onto the last one.
+        val carried = readEntries(report).filterNot { it.contains(""""wrapper": "depminer"""") }
+        val entries = (carried + own).joinToString(",\n") { "    $it" }
         report.writeText("{\n  \"schemaVersion\": 1,\n  \"flagged\": [\n$entries\n  ]\n}\n")
     }
+
+    private fun readEntries(report: File): List<String> = runCatching {
+        if (!report.isFile) return emptyList()
+        report.readLines().mapNotNull { ENTRY.find(it)?.groupValues?.get(1) }
+    }.getOrElse { emptyList() }
 
     private fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
 }

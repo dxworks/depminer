@@ -89,6 +89,47 @@ class HostPathScrubTest {
     }
 
     @Test
+    fun `entries from the wrappers survive a jar write, its own previous ones do not`(@TempDir tmp: Path) {
+        // The wrappers rebuild this same file (bin/syft-wrapper.sh, _report_write) and the jar
+        // runs first, but it is also runnable on its own against a results dir they already wrote.
+        val results = tmp.resolve("results").also { it.toFile().mkdirs() }
+        ScrubReport.write(results, listOf(Flagged("stale.json", "p", listOf("home"), 1)))
+        val report = results.resolve("scrub-report.json").toFile()
+        report.writeText(
+            report.readText().replace(
+                "\"wrapper\": \"depminer\", \"project\": \"p\", \"file\": \"stale.json\"",
+                "\"wrapper\": \"syft\", \"project\": \"p\", \"file\": \"from-syft.json\""
+            )
+        )
+
+        ScrubReport.write(results, listOf(Flagged("fresh.json", "p", listOf("out"), 1)))
+
+        val text = report.readText()
+        assertTrue(text.contains("from-syft.json"), "a wrapper entry was dropped: $text")
+        assertTrue(text.contains("fresh.json"))
+        assertFalse(text.contains("stale.json"), "the jar's own previous entry was kept: $text")
+        // Still one entry per line with the indent the wrappers parse.
+        assertEquals(2, report.readLines().count { it.startsWith("    {\"timestamp\"") })
+    }
+
+    @Test
+    fun `a file deleted during sanitization is not counted as emitted`(@TempDir tmp: Path) {
+        // sanitizeFile deletes a file carrying a private key; it never ships, so it must not be
+        // verified or counted among the emitted files.
+        val target = tmp.resolve("scan-target").also { it.toFile().mkdirs() }
+        val results = tmp.resolve("results").also { it.toFile().mkdirs() }
+        val keyFile = results.resolve("id_rsa").toFile()
+        keyFile.writeText("-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----\n")
+        val sanitizeYml = File(tmp.toFile(), "sanitize.yml").apply { writeText("patterns: []\n") }
+
+        Sanitizer().sanitizeFiles(results, sanitizeYml.path, rules(target, results))
+
+        assertFalse(keyFile.exists(), "the private-key file should have been deleted")
+        val text = results.resolve("scrub-report.json").toFile().readText()
+        assertFalse(text.contains("id_rsa"), "a deleted file must not be flagged: $text")
+    }
+
+    @Test
     fun `a clean run still writes an empty report, so absent and clean are distinguishable`(@TempDir tmp: Path) {
         val target = tmp.resolve("scan-target").also { it.toFile().mkdirs() }
         val results = tmp.resolve("results").also { it.toFile().mkdirs() }

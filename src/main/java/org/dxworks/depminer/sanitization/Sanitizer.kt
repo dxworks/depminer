@@ -57,6 +57,9 @@ class Sanitizer {
 
             val startTime = System.currentTimeMillis()
             var sanitizedCount = 0
+            // Files still present after sanitization, i.e. the ones that actually ship. Not the
+            // same as sanitizedCount, which counts only the files a pattern rewrote.
+            var emittedCount = 0
             val flagged = mutableListOf<Flagged>()
             val projects = projectsByFile(resultsPath)
 
@@ -66,7 +69,9 @@ class Sanitizer {
                     if (sanitizeFile(file, compiledPatterns, hostRules)) {
                         sanitizedCount++
                     }
-                    if (file.exists() && hostRules.isNotEmpty()) {
+                    if (!file.exists()) return@forEach
+                    emittedCount++
+                    if (hostRules.isNotEmpty()) {
                         verifyScrubbed(file, hostRules)?.let { f ->
                             val hit = f.copy(project = projects[file.name] ?: "")
                             flagged.add(hit)
@@ -84,7 +89,7 @@ class Sanitizer {
                 ScrubReport.write(resultsPath, flagged)
                 if (flagged.isNotEmpty()) {
                     println(
-                        ">> WARNING: ${flagged.size} of $sanitizedCount emitted file(s) FAILED scrub " +
+                        ">> WARNING: ${flagged.size} of $emittedCount emitted file(s) FAILED scrub " +
                             "verification and carry host data - see scrub-report.json"
                     )
                 }
