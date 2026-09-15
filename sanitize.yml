@@ -1,3 +1,10 @@
+# Each pattern may carry `scope: manifests` (default `all`). `manifests` skips lockfiles - *.lock,
+# *-lock.*, *.lockfile, go.sum, packages.lock.json, npm-shrinkwrap.json - whose every line is a
+# resolved package and version: a config-file pattern matching a package NAME there rewrites the
+# version (`spring-boot-jdbc:4.1.0=...` lost its version to the jdbc rule). Patterns with a
+# distinctive prefix (AKIA, ghp_, glpat-, _authToken=) have no such false positives and stay `all`.
+# Any line a pattern still rewrites inside a lockfile is reported in scrub-report.json as
+# `redacted-inside-lockfile`.
 patterns:
   # ── 1. Cloud-provider keys ───────────────────────────────
   - pattern: "AKIA[0-9A-Z]{16}"
@@ -67,25 +74,32 @@ patterns:
 
   - pattern: "jdbc:[^\\s;]+(?:;[^\\s;]+)*"
     replacement: "jdbc:***REDACTED***"
+    scope: manifests
 
   - pattern: "postgres(?:ql)?://[^:\\s]+:[^@\\s]+@[^:\\s]+:\\d+/[a-zA-Z0-9_-]+"
     replacement: "postgres://***REDACTED***@"
+    scope: manifests
 
   - pattern: "mysql://[^:\\s]+:[^@\\s]+@[^:\\s]+(?::\\d+)?/[a-zA-Z0-9_-]+"
     replacement: "mysql://***REDACTED***@"
+    scope: manifests
 
   - pattern: "(?i)(Server|Data Source)=[^;]+;(User Id|Uid)=[^;]+;(Password|Pwd)=[^;]+"
     replacement: "$1=***REDACTED***;$2=***REDACTED***;$3=***REDACTED***"
+    scope: manifests
 
   - pattern: "mongodb(?:\\+srv)?://[^:\\s]+:[^@\\s]+@[^\\s]+"
     replacement: "mongodb://***REDACTED***@"
+    scope: manifests
 
   - pattern: "jdbc:oracle:thin:[^/]+/[^@]+@[^:\\s]+:\\d+/[^\\s]+"
     replacement: "jdbc:oracle:thin:***REDACTED***"
+    scope: manifests
 
   # ── 4. Generic assignments ───────────────────────────────
   - pattern: "(?i)(password|passphrase|pwd|secret|token|key|jwt)\\s*([:=])\\s*(['\"]?)[A-Za-z0-9/+!@#$%^&*_~.-]{8,}\\3"
     replacement: "$1$2$3***REDACTED***$3"
+    scope: manifests
 
   # ── 5. Personal info ─────────────────────────────────────
   - pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b"
@@ -93,6 +107,7 @@ patterns:
 
   - pattern: "<url>https?://[^<]+</url>"
     replacement: "<url>https://repository.redacted.com</url>"
+    scope: manifests
     
   # ── 6. Package Registry Credentials ─────────────────────
   - pattern: "(?i)registry\\.npmjs\\.org/:_authToken=[A-Za-z0-9-_]{40,}"
@@ -114,6 +129,7 @@ patterns:
   # ── 8. Gradle Properties ─────────────────────────────────
   - pattern: "(?i)(sonatype|nexus|artifactory|repository)\\.(username|password)\\s*=\\s*[^\\s]+"
     replacement: "$1.$2=***REDACTED***"
+    scope: manifests
 
   # ── 9. Python pip Configuration ─────────────────────────
   - pattern: "(?i)index-url\\s*=\\s*https?://[^:]+:[^@]+@"
@@ -126,19 +142,24 @@ patterns:
   # ── 11. Environment Variables in Configuration Files ────
   - pattern: "(?i)env:\\s*['\"]?(API_KEY|SECRET|TOKEN|PASSWORD)['\"]?\\s*:\\s*['\"]?[A-Za-z0-9_.-]{8,}['\"]?"
     replacement: "env: \"$1\": \"***REDACTED***\""
+    scope: manifests
 
   # ── 12. Hardcoded Secrets in Build Scripts ───────────────
   - pattern: "(?i)(?:set|export)\\s+(API_KEY|SECRET|TOKEN|PASSWORD)\\s*=\\s*['\"]?[A-Za-z0-9_.-]{8,}['\"]?"
     replacement: "$1=***REDACTED***"
+    scope: manifests
 
   # ── 13. Certificate Thumbprints and Serial Numbers ──────
   - pattern: "(?i)certificate[_\\-]?(thumbprint|serial)\\s*[:=]\\s*['\"]?[A-Fa-f0-9:]{40,}['\"]?"
     replacement: "$1: \"***REDACTED***\""
+    scope: manifests
 
   # ── 14. Internal Hostnames and Domains ───────────────────
   - pattern: "(?i)(host|server|domain)\\s*[:=]\\s*['\"]?([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}['\"]?"
     replacement: "$1: \"internal-host.redacted.com\""
+    scope: manifests
 
   # ── 15. Gradle Signing Configurations ─────────────────────
   - pattern: "(storePassword|keyPassword|keyAlias)\\s+[\"']([^\"']+)[\"']"
     replacement: "$1 \"***REDACTED***\""
+    scope: manifests

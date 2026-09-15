@@ -5,7 +5,7 @@ As a **Voyager instrument** it runs three tools per mission, side by side:
 
 | Command name (use exactly this in `mission.yml`) | Tool | Output (under `depminer/results/` inside the results zip) |
 |---|---|---|
-| `Mine Dependencies` | depminer | `depminer/` — mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
+| `Mine Dependencies` | depminer | `depminer/` — mined manifests and lockfiles (`pom-*.xml`, `package-lock-*.json`, `Cargo.lock`, `go.sum`, …) + `index.json` + `skipped.json` |
 | `Syft SBOM` | Syft (bundled) | `syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
 | `Trivy Extract` | Trivy (bundled) | `trivy/` — `<project>.trivy.cdx.json` per project |
 
@@ -39,8 +39,15 @@ For every project it finds in the target folder, DepMiner produces the following
 the run's results zip (`<mission>-voyager-results.zip`, under `depminer/results/` — see
 [Quick Start → Find your results](quickstart.md#3-find-your-results)):
 
-- **Mined manifests** (`results/depminer/`) — the raw dependency declarations depminer extracts,
-  plus an `index.json` mapping each copied file back to its path under the target.
+- **Mined manifests and lockfiles** (`results/depminer/`) — every manifest and lockfile a
+  package manager wrote (`package.json` + `package-lock.json`/`yarn.lock`/`pnpm-lock.yaml`,
+  `Cargo.toml` + `Cargo.lock`, `go.mod` + `go.sum`, `pyproject.toml` + `uv.lock`/`poetry.lock`,
+  `packages.lock.json`, `Gemfile.lock`, `composer.lock`, `gradle.lockfile`, …; the full list is
+  `depminer.yml`), plus an `index.json` mapping each copied file back to its path under the
+  target and a `skipped.json` naming any matched file that did **not** ship, with the reason.
+  Package-manager *config* files (`.npmrc`, `.yarnrc.yml`, `nuget.config`, `pip.conf`,
+  `settings.xml`, `gradle.properties`, dotenv files) are never copied — they hold no dependency
+  information and are where registry tokens live (`.ignore.yml`).
 - **Syft SBOMs** (`results/syft/`) — three formats per project: native Syft JSON, CycloneDX
   (`.cdx.json`), and SPDX.
 - **Trivy SBOM** (`results/trivy/`) — CycloneDX per project (`.trivy.cdx.json`).

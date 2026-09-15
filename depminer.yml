@@ -1,17 +1,34 @@
+# Files depminer copies out of the scanned tree, by language. Matched case-insensitively as
+# wildcards against the file name, anywhere under the target (dirs in .ignore.yml excluded).
+#
+# The rule: every file Syft or Trivy reads as a package location is in this list, and the manifest
+# sits next to its lockfile even when the lockfile alone would do. The Syft SBOM cannot say which
+# packages are direct for npm/yarn/pnpm/rubygems and has no edges for composer, rubygems, go and
+# gradle; the lockfile can, but only when it was saved.
+#
+# Deliberately NOT here: package-manager CONFIG files - .npmrc, .yarnrc.yml, nuget.config,
+# pip.conf, .pypirc, settings.xml, gradle.properties, dotenv files. They carry no dependency
+# information and are exactly where registry tokens live. They are listed in .ignore.yml so that a
+# widened wildcard cannot pick them up by accident.
 java:
   - pom.xml
   - build.gradle
+  - build.gradle.kts
   - settings.gradle
+  - settings.gradle.kts
   - gradle.lockfile
+  - buildscript-gradle.lockfile
+  - libs.versions.toml
   - deptree.txt
   - '*.sbt'
 
 javascript:
   - package.json
   - package-lock.json
+  - npm-shrinkwrap.json
   - yarn.lock
   - pnpm-lock.yaml
-  - npm-shrinkwrap.json
+  - pnpm-workspace.yaml
 
 php:
   - composer.json
@@ -24,18 +41,33 @@ ruby:
   - Rakefile
 
 python:
-  - requirements.txt
+  - 'requirements*.txt'
   - setup.py
   - setup.cfg
   - pyproject.toml
   - '*Pipfile*'
+  - poetry.lock
+  - pdm.lock
+  - uv.lock
+
+go:
+  - go.mod
+  - go.sum
+  - go.work
+  - go.work.sum
+
+rust:
+  - Cargo.toml
+  - Cargo.lock
 
 dotnet:
   - packages.config
+  - packages.lock.json
   - project.json
   - project.lock.json
   - project.assets.json
   - Directory.Build.props
+  - Directory.Packages.props
   - paket.dependencies
   - paket.lock
   - '*.csproj'
