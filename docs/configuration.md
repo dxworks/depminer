@@ -68,3 +68,29 @@ Syft and Trivy scan every project in the target even if one of them fails:
 
 The command then reports as **FAILED** in the mission summary — check its log to see which projects
 were affected. All other result files are still written.
+
+## What depminer copies, and how it is scrubbed
+
+`depminer.yml` lists, per language, the manifests and lockfiles copied into `results/depminer/`;
+`.ignore.yml` lists what is never copied (package-manager config files such as `.npmrc`,
+`nuget.config`, `pip.conf`, `settings.xml` — no dependency information, and the usual home of
+registry tokens). Both are plain wildcard lists and can be edited per install.
+
+Every copied file then goes through `sanitize.yml` (credential patterns) and the host-path scrub.
+Each pattern accepts an optional `scope`:
+
+| `scope` | Runs on |
+|---|---|
+| `all` (default) | every copied file |
+| `manifests` | every copied file **except lockfiles** (`*.lock`, `*-lock.*`, `*.lockfile`, `go.sum`, `packages.lock.json`, `npm-shrinkwrap.json`) |
+
+A lockfile is generated text where every line is a resolved package and its version, so a pattern
+written for config files (`jdbc:…`, `token=…`, `host: …`) can match a package *name* there and
+rewrite its version. The shipped `sanitize.yml` marks those patterns `manifests`; the ones with a
+distinctive prefix (`AKIA`, `ghp_`, `glpat-`, `_authToken=`, `://user:token@`) keep running on
+lockfiles too. Whenever a pattern does rewrite a line inside a lockfile, the file is listed in
+`results/scrub-report.json` with reason `redacted-inside-lockfile` — the rule that matched and how
+many lines, never the value.
+
+A file removed during scrubbing (a private key inside it) is dropped from `index.json` and listed
+in `results/depminer/skipped.json` with its original path and the reason.

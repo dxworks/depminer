@@ -184,23 +184,34 @@ private fun extract(
             dirFilter
         )
 
+    // index.json: saved name -> path under the target (first segment = repo). skipped.json: the
+    // same key for files that matched but did NOT ship, with the reason, so a consumer can tell a
+    // file that was never there from one that was dropped.
     val resultsMap = mutableMapOf<String, String>()
+    val skippedMap = mutableMapOf<String, Map<String, String>>()
 
     println("Writing Results...")
+
+    fun save(file: File, savedName: String) {
+        val rel = file.relativeTo(target.toFile()).normalize().toString()
+        try {
+            file.copyTo(depminerResultsPath.resolve(savedName).toFile())
+            resultsMap[savedName] = rel
+        } catch (e: Exception) {
+            println("Could not copy $rel: ${e.message}")
+            skippedMap[savedName] = mapOf("path" to rel, "reason" to "copy-failed: ${e.message}")
+        }
+    }
 
     packageFiles.groupBy { it.name.lowercase() }.forEach { entry ->
         if (entry.value.size > 1) {
             entry.value.forEachIndexed { index, file: File ->
                 val newName =
                     "${file.nameWithoutExtension}-$index${file.extension.let { if (it.isNotEmpty()) ".$it" else "" }}"
-                file.copyTo(depminerResultsPath.resolve(newName).toFile())
-                resultsMap[newName] = file.relativeTo(target.toFile()).normalize().toString()
+                save(file, newName)
             }
         } else {
-            entry.value.firstOrNull()?.also {
-                it.copyTo(depminerResultsPath.resolve(it.name).toFile())
-                resultsMap[it.name] = it.relativeTo(target.toFile()).normalize().toString()
-            }
+            entry.value.firstOrNull()?.also { save(it, it.name) }
         }
     }
 
@@ -215,15 +226,29 @@ private fun extract(
             // path of every csproj, the NuGet package folder and the restore config - and
             // sanitize.yml has credential patterns only. Scrub those paths too, then check the
             // emitted bytes and record anything still carrying them in scrub-report.json.
-            Sanitizer().sanitizeFiles(
+            val outcome = Sanitizer().sanitizeFiles(
                 depminerResultsPath, sanitizeFile,
                 buildHostRules(target, listOf(depminerResultsPath, scrubReportPath), System.getenv("HOME")),
                 scrubReportPath
             )
+            // A file the sanitizer deleted (private key inside) used to stay in index.json as if it
+            // had shipped, and nothing said otherwise. It comes out of the index and goes into
+            // skipped.json with its original path and the reason, so an absence is explained rather
+            // than discovered.
+            outcome.skipped.forEach { s ->
+                skippedMap[s.file] = mapOf("path" to (resultsMap.remove(s.file) ?: ""), "reason" to s.reason)
+            }
+            if (outcome.skipped.isNotEmpty()) {
+                jacksonObjectMapper().writerWithDefaultPrettyPrinter()
+                    .writeValue(depminerResultsPath.resolve("index.json").toFile(), resultsMap)
+            }
         } else {
             println("Sanitization file path is null, skipping sanitization")
         }
     }
+
+    jacksonObjectMapper().writerWithDefaultPrettyPrinter()
+        .writeValue(depminerResultsPath.resolve("skipped.json").toFile(), skippedMap)
 
     println("\nDepMi (Dependency Miner) finished successfully! Please view your results at ${depminerResultsPath.toFile().absolutePath}")
 

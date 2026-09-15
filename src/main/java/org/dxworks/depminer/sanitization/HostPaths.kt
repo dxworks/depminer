@@ -30,7 +30,12 @@ data class Flagged(
     val file: String,
     val project: String,
     val matchedRules: List<String>,
-    val matchCount: Int
+    val matchCount: Int,
+    /**
+     * Why the entry is in the report. The default is the original one; `redacted-inside-lockfile`
+     * marks a lockfile where a sanitize pattern rewrote a line, i.e. a dependency entry may be gone.
+     */
+    val reason: String = "emitted-despite-failed-scrub-verification"
 )
 
 /** `://user:token@host` in a lockfile's resolved URL. A fixed rule, nothing to mis-escape. */
@@ -116,7 +121,7 @@ object ScrubReport {
         val own = flagged.map { f ->
             val rules = f.matchedRules.joinToString(", ") { "\"$it\"" }
             """{"timestamp": "$now", "wrapper": "depminer", "project": "${esc(f.project)}", """ +
-                """"file": "${esc(f.file)}", "reason": "emitted-despite-failed-scrub-verification", """ +
+                """"file": "${esc(f.file)}", "reason": "${esc(f.reason)}", """ +
                 """"matchedRules": [$rules], "matchCount": ${f.matchCount}}"""
         }
         // The wrappers accumulate into this one file (see _report_write in bin/syft-wrapper.sh),

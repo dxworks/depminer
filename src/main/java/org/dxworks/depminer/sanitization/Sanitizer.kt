@@ -10,14 +10,47 @@ import java.nio.file.Path
 private val yamlMapper = ObjectMapper(YAMLFactory()).registerModule(KotlinModule.Builder().build())
 private val jsonMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
 
+/**
+ * @param scope which emitted files the pattern runs on. `all` (the default, so an existing
+ *   sanitize.yml keeps its meaning) or `manifests`: everything EXCEPT lockfiles. A lockfile is
+ *   generated text where every line is a resolved package and its version, so a pattern written
+ *   for config files - `jdbc:...`, `token=...`, `host: ...` - matches package names there and
+ *   silently destroys versions: `spring-boot-jdbc:4.1.0=` lost its version to the connection-string
+ *   rule. Patterns with a distinctive prefix (`ghp_`, `AKIA`, `_authToken=`) have no such false
+ *   positives and stay on `all`.
+ */
 data class SanitizationPattern(
     val pattern: String,
-    val replacement: String
+    val replacement: String,
+    val scope: String = SCOPE_ALL
 )
 
 data class SanitizationConfig(
     val patterns: List<SanitizationPattern> = emptyList()
 )
+
+const val SCOPE_ALL = "all"
+const val SCOPE_MANIFESTS = "manifests"
+
+/**
+ * Lockfiles, by name: `*.lock` (Cargo, composer, Gemfile, poetry, uv, pdm, paket, yarn),
+ * `*-lock.*` (package-lock.json, pnpm-lock.yaml), `*.lockfile` (gradle), plus the ones that do
+ * not follow a convention. `project.assets.json` is deliberately NOT one: it carries feed URLs and
+ * restore paths, i.e. config, and keeps the full pattern set.
+ */
+fun isLockfile(name: String): Boolean {
+    val n = name.lowercase()
+    return n.endsWith(".lock") || n.endsWith(".lockfile") ||
+        n.endsWith("-lock.json") || n.endsWith("-lock.yaml") || n.endsWith("-lock.yml") ||
+        n == "go.sum" || n == "go.work.sum" || n == "packages.lock.json" ||
+        n == "npm-shrinkwrap.json" || n == "project.lock.json"
+}
+
+/** A file removed from the results during sanitization, and why. Goes to skipped.json. */
+data class Skipped(val file: String, val reason: String)
+
+/** What a sanitization pass did, beyond rewriting files in place. */
+data class SanitizationResult(val skipped: List<Skipped> = emptyList())
 
 /**
  * Main sanitization class responsible for sanitizing files based on configured patterns
@@ -50,7 +83,13 @@ class Sanitizer {
      *   shipped clean. The three-argument form above passes [resultsPath] itself, which is what
      *   a standalone run wants.
      */
-    fun sanitizeFiles(resultsPath: Path, sanitizeFile: String, hostRules: List<HostRule>, reportDir: Path) {
+    fun sanitizeFiles(
+        resultsPath: Path,
+        sanitizeFile: String,
+        hostRules: List<HostRule>,
+        reportDir: Path
+    ): SanitizationResult {
+        val skipped = mutableListOf<Skipped>()
         try {
             val sanitizationConfig: SanitizationConfig = yamlMapper.readValue(File(sanitizeFile))
 
@@ -58,12 +97,13 @@ class Sanitizer {
 
             val compiledPatterns = sanitizationConfig.patterns.mapNotNull { pattern ->
                 try {
-                    CompiledPattern(Regex(pattern.pattern), pattern.replacement)
+                    CompiledPattern(Regex(pattern.pattern), pattern.replacement, pattern.scope)
                 } catch (e: Exception) {
                     println("Error compiling pattern '${pattern.pattern}': ${e.message}")
                     null
                 }
             }
+            val lockfilePatterns = compiledPatterns.filter { it.scope != SCOPE_MANIFESTS }
 
             val startTime = System.currentTimeMillis()
             var sanitizedCount = 0
@@ -71,19 +111,44 @@ class Sanitizer {
             // same as sanitizedCount, which counts only the files a pattern rewrote.
             var emittedCount = 0
             val flagged = mutableListOf<Flagged>()
-            val projects = projectsByFile(resultsPath)
+            val index = readIndex(resultsPath)
+            val projects = index.mapValues { (_, rel) -> rel.substringBefore('/') }
+            // Duplicate names ship renamed (package-lock-1.json, pnpm-lock-0.yaml), so the saved
+            // name no longer says what the file is; the original one in index.json does.
+            val originalNames = index.mapValues { (_, rel) -> rel.substringAfterLast('/') }
 
             resultsPath.toFile().listFiles()
-                ?.filter { it.isFile && it.name != "index.json" && it.name != "scrub-report.json" }
+                ?.filter { it.isFile && it.name !in OWN_FILES }
                 ?.forEach { file ->
-                    if (sanitizeFile(file, compiledPatterns, hostRules)) {
+                    val lockfile = isLockfile(originalNames[file.name] ?: file.name)
+                    val outcome = sanitizeFile(file, if (lockfile) lockfilePatterns else compiledPatterns, hostRules)
+                    if (outcome.modified) {
                         sanitizedCount++
+                    }
+                    if (outcome.deletedReason != null) {
+                        skipped.add(Skipped(file.name, outcome.deletedReason))
+                        return@forEach
                     }
                     if (!file.exists()) return@forEach
                     emittedCount++
+                    val project = projects[file.name] ?: ""
+                    // A rewrite inside a lockfile is a dependency entry changed - never silent.
+                    // The task that found the jdbc case found it by diffing against the checkout.
+                    if (lockfile && outcome.patternHits > 0) {
+                        val hit = Flagged(
+                            file.name, project, outcome.patternRules, outcome.patternHits,
+                            reason = "redacted-inside-lockfile"
+                        )
+                        flagged.add(hit)
+                        println(
+                            ">> WARNING: ${file.name} is a lockfile and ${hit.matchCount} line(s) were " +
+                                "rewritten by a sanitize pattern (${hit.matchedRules.joinToString(", ") { "\"$it\"" }}) " +
+                                "- dependency entries may be lost - see scrub-report.json"
+                        )
+                    }
                     if (hostRules.isNotEmpty()) {
                         verifyScrubbed(file, hostRules)?.let { f ->
-                            val hit = f.copy(project = projects[file.name] ?: "")
+                            val hit = f.copy(project = project)
                             flagged.add(hit)
                             println(
                                 ">> WARNING: ${file.name} was emitted but FAILED scrub verification - " +
@@ -99,8 +164,8 @@ class Sanitizer {
                 ScrubReport.write(reportDir, flagged)
                 if (flagged.isNotEmpty()) {
                     println(
-                        ">> WARNING: ${flagged.size} of $emittedCount emitted file(s) FAILED scrub " +
-                            "verification and carry host data - see scrub-report.json"
+                        ">> WARNING: ${flagged.size} of $emittedCount emitted file(s) are flagged - " +
+                            "host data still present, or a lockfile rewritten - see scrub-report.json"
                     )
                 }
             }
@@ -110,17 +175,26 @@ class Sanitizer {
         } catch (e: Exception) {
             println("Error reading sanitization configuration: ${e.message}")
         }
+        return SanitizationResult(skipped)
     }
 
     private data class CompiledPattern(
         val regex: Regex,
-        val replacement: String
+        val replacement: String,
+        val scope: String
+    )
+
+    private class Outcome(
+        val modified: Boolean,
+        val deletedReason: String? = null,
+        val patternHits: Int = 0,
+        val patternRules: List<String> = emptyList()
     )
 
     /** index.json maps each emitted file to its path under the target; the first segment names the repo. */
-    private fun projectsByFile(resultsPath: Path): Map<String, String> = runCatching {
+    private fun readIndex(resultsPath: Path): Map<String, String> = runCatching {
         val index: Map<String, String> = jsonMapper.readValue(resultsPath.resolve("index.json").toFile())
-        index.mapValues { (_, rel) -> rel.replace('\\', '/').substringBefore('/') }
+        index.mapValues { (_, rel) -> rel.replace('\\', '/') }
     }.getOrElse { emptyMap() }
 
     /**
@@ -128,12 +202,15 @@ class Sanitizer {
      *
      * @param file The file to sanitize
      * @param patterns List of compiled sanitization patterns to apply
-     * @return true if the file was modified, false otherwise
+     * @return what happened: rewritten or not, deleted and why, and how many lines a configured
+     *   pattern (not a host rule) changed
      */
-    private fun sanitizeFile(file: File, patterns: List<CompiledPattern>, hostRules: List<HostRule>): Boolean {
+    private fun sanitizeFile(file: File, patterns: List<CompiledPattern>, hostRules: List<HostRule>): Outcome {
         val tempFile = File("${file.absolutePath}.tmp")
         var modified = false
         var keyDetected = false
+        var patternHits = 0
+        val patternRules = LinkedHashSet<String>()
 
         try {
             file.bufferedReader().use { reader ->
@@ -144,7 +221,9 @@ class Sanitizer {
                             return@forEach
                         }
 
-                        val sanitizedLine = scrubLine(applyPatterns(line, patterns), hostRules)
+                        val afterPatterns = applyPatterns(line, patterns, patternRules)
+                        if (afterPatterns != line) patternHits++
+                        val sanitizedLine = scrubLine(afterPatterns, hostRules)
                         writer.write(sanitizedLine)
                         writer.newLine()
 
@@ -158,18 +237,18 @@ class Sanitizer {
             if (keyDetected) {
                 println("Private key detected in ${file.name}, skipping and deleting file.")
                 file.delete()
-                return false
+                return Outcome(modified = false, deletedReason = "private-key-detected")
             }
 
             if (modified) {
                 tempFile.copyTo(file, overwrite = true)
-                return true
+                return Outcome(modified = true, patternHits = patternHits, patternRules = patternRules.toList())
             }
 
-            return false
+            return Outcome(modified = false)
         } catch (e: Exception) {
             println("Error sanitizing file ${file.name}: ${e.message}")
-            return false
+            return Outcome(modified = false)
         } finally {
             if (tempFile.exists()) {
                 tempFile.delete()
@@ -182,15 +261,23 @@ class Sanitizer {
      *
      * @param line The line to sanitize
      * @param patterns List of compiled sanitization patterns to apply
+     * @param hitRules collects the pattern of every rule that changed the line - the pattern
+     *   text, never the matched value
      * @return The sanitized line
      */
-    private fun applyPatterns(line: String, patterns: List<CompiledPattern>): String {
+    private fun applyPatterns(line: String, patterns: List<CompiledPattern>, hitRules: MutableSet<String>): String {
         var result = line
 
         patterns.forEach { pattern ->
-            result = pattern.regex.replace(result, pattern.replacement)
+            val next = pattern.regex.replace(result, pattern.replacement)
+            if (next != result) hitRules.add(pattern.regex.pattern)
+            result = next
         }
 
         return result
+    }
+
+    private companion object {
+        val OWN_FILES = setOf("index.json", "scrub-report.json", "skipped.json")
     }
 }

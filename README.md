@@ -5,7 +5,7 @@ Depminer mines dependency information from a target folder of repositories. As a
 
 | Command name (use exactly this in mission.yml) | Tool | Output |
 |---|---|---|
-| `Mine Dependencies` | depminer | `results/depminer/` — mined manifest files (`pom-*.xml`, `package-*.json`, …) + `index.json` |
+| `Mine Dependencies` | depminer | `results/depminer/` — mined manifests and lockfiles (`pom-*.xml`, `package-lock-*.json`, `Cargo.lock`, `go.sum`, …) + `index.json` + `skipped.json` |
 | `Syft SBOM` | Syft (bundled) | `results/syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
 | `Trivy Extract` | Trivy (bundled) | `results/trivy/` — `<project>.trivy.cdx.json` per project |
 
