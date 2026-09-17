@@ -113,7 +113,7 @@ fun main(args: Array<String>) {
 
 // Skips the command and the target, so a folder that happens to be named "no-sanitize" cannot
 // switch host-path scrubbing off. This is a fail-OPEN switch on the control that exists to keep
-// a client's paths out of the results, so it only ever reads the arguments meant for it.
+// host paths out of the results, so it only ever reads the arguments meant for it.
 /**
  * Clears the files sitting at the root of the shared results dir, the jar's own output folder
  * being one level down inside it.

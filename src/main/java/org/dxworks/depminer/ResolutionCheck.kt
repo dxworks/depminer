@@ -70,8 +70,8 @@ object ResolutionCheck {
         return message(
             stack = ".NET",
             head = "${unresolved.size} project(s) have no packages.lock.json (e.g. ${unresolved.first().describe(target)})",
-            effect = "You will get direct dependencies only — roughly 10 % of the real tree " +
-                "(measured on eShopOnWeb: 33 of 303 components, 0 transitive).",
+            effect = "You will get direct dependencies only, a small fraction of the real tree, " +
+                "with no transitive dependencies at all.",
             fix = "dotnet restore YourSolution.sln --use-lock-file   (a plain `dotnet restore` buys nothing: " +
                 "obj/project.assets.json is read by neither scanner), then commit the packages.lock.json files."
         )
@@ -90,9 +90,8 @@ object ResolutionCheck {
         return message(
             stack = "Gradle",
             head = "${unresolved.size} module(s) have no Gradle lock file (e.g. ${unresolved.first().describe(target)} has no *.gradle.lockfile)",
-            effect = "These modules contribute nothing at all: Trivy's only Gradle input is the *.gradle.lockfile — " +
-                "it never reads build.gradle. (Measured on spring-petclinic: with the lockfile Trivy reaches " +
-                "201 of Black Duck's 209 rows; without it the Gradle build contributes 0.)",
+            effect = "These modules contribute nothing at all: Trivy's only Gradle input is the " +
+                "*.gradle.lockfile, and it never reads build.gradle.",
             fix = "add `dependencyLocking { lockAllConfigurations() }` to build.gradle, run " +
                 "`./gradlew dependencies --write-locks`, then commit the lock files."
         )
@@ -111,8 +110,8 @@ object ResolutionCheck {
             stack = "Maven",
             head = "${poms.size} pom.xml project(s) found, but the local Maven cache " +
                 "(${m2Repository?.homeRelative() ?: "~/.m2/repository"}) is missing or empty on this machine",
-            effect = "You will get direct declarations only — the cache is what resolves the transitive tree " +
-                "offline (measured on spring-petclinic: 106 components with a warm cache, 16 with an empty one).",
+            effect = "You will get direct declarations only: the cache is what resolves the " +
+                "transitive tree offline.",
             fix = "run `mvn dependency:go-offline` (or a normal build) on THIS machine before scanning."
         )
     }
@@ -129,7 +128,7 @@ object ResolutionCheck {
         append("  See PREP_GUIDE.md.")
     }
 
-    // The scan is supposed to give away nothing about the client's filesystem layout - the SBOM
+    // The scan is supposed to give away nothing about the host's filesystem layout - the SBOM
     // wrappers rewrite $HOME to "~" for exactly that reason - so this warning, printed by the same
     // run, must not put the absolute cache path back into the log.
     private fun File.homeRelative(): String {
