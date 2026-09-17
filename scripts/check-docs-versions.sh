@@ -8,30 +8,32 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RELEASE_SCRIPT="scripts/prepare-release-voyager.sh"
-DOC="docs/tools.md"
+DOCS="docs/tools.md README.md"
 status=0
 
 check() {
-  local name="$1" var="$2" pinned documented
+  local name="$1" var="$2" doc="$3" pinned documented
   pinned=$(sed -n "s/^${var}=\"\([^\"]*\)\".*/\1/p" "$RELEASE_SCRIPT" | head -1)
   documented=$(awk -F'|' -v n="$name" '
-    tolower($2) ~ "^ *" n " *$" { gsub(/ /, "", $3); print $3; exit }' "$DOC")
+    tolower($2) ~ "^ *" n " *$" { gsub(/ /, "", $3); print $3; exit }' "$doc")
 
   if [ -z "$pinned" ]; then
     echo "::error file=$RELEASE_SCRIPT::could not read $var"
     status=1
   elif [ -z "$documented" ]; then
-    echo "::error file=$DOC::no version row found for $name"
+    echo "::error file=$doc::no version row found for $name"
     status=1
   elif [ "$pinned" != "$documented" ]; then
-    echo "::error file=$DOC::$name is documented as '$documented' but $RELEASE_SCRIPT pins '$pinned'"
+    echo "::error file=$doc::$name is documented as '$documented' but $RELEASE_SCRIPT pins '$pinned'"
     status=1
   else
-    echo "ok  $name $pinned"
+    echo "ok  $doc: $name $pinned"
   fi
 }
 
-check syft  SYFT_VERSION
-check trivy TRIVY_VERSION
+for doc in $DOCS; do
+  check syft  SYFT_VERSION  "$doc"
+  check trivy TRIVY_VERSION "$doc"
+done
 
 exit $status

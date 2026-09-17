@@ -63,14 +63,13 @@ mvn dependency:go-offline
 That downloads every dependency's metadata into `~/.m2/repository`. After that, both scanners
 resolve the **full transitive tree** from the cache — no network.
 
-**Measured effect** (Apache Zeppelin, offline): Maven components detected went from **~1000 →
-~2400 (Trivy)** and **~300 → ~4000 (Syft)** once `~/.m2` was warmed. Same repo, same scan, only
-difference is the cache.
+**What the warm cache buys you:** on a large multi-module Maven project, warming `~/.m2`
+typically multiplies the number of detected components several times over, for both scanners.
+Same repo, same scan, only difference is the cache.
 
-The warm cache is what makes the offline scan work at all — it is not a speed-up. On
-spring-petclinic, Trivy finds **106** components with a populated `~/.m2`; with an empty `~/.m2`
-and offline mode it finds **16** — the direct declarations, most without a version. Same repo,
-same command.
+The warm cache is what makes the offline scan work at all. It is not a speed-up. With an empty
+`~/.m2` and offline mode, a Maven project reports little more than the direct declarations
+written in its `pom.xml`, most of them without even a version.
 
 If your build machine already compiles this project regularly, `~/.m2` is **already warm** and
 you need to do nothing.
@@ -90,14 +89,15 @@ travels inside the repo:
 This writes `gradle.lockfile` (per module). Commit it. Both scanners read it and report the
 full tree — and because it lives in the repo, it is portable (no cache needed at scan time).
 
-**Measured effect** (spring-petclinic): with the lock file, Trivy reaches **201 of Black Duck's
-209 rows** (222 real components). Without it, the repo's Gradle build contributes **0** — Trivy's
-only Gradle input is `*.gradle.lockfile`, it never reads `build.gradle`.
+**Why the lock file is not optional here:** with it, the Gradle project's full resolved tree is
+reported. Without it, the Gradle build contributes **nothing at all**: Trivy's only Gradle input
+is `*.gradle.lockfile`, and it never reads `build.gradle`.
 
 This matters more than it looks, even on a project you think of as Maven. The lock file also locks
 the **test** configurations, so it recovers dependencies Trivy's `pom` parser structurally cannot
 see: that parser skips `test` and `optional` scope, and the `--include-dev-deps` switch covers
-npm/yarn/gradle but **not** `pom`. On spring-petclinic those two effects are the same 96-row gap.
+npm/yarn/gradle but **not** `pom`. On a project that builds with both, those two effects overlap
+and account for most of the difference.
 
 ## .NET
 
@@ -119,10 +119,10 @@ live inside the repo, so they are portable — no cache needed at scan time.
 Without them, the scan falls back to `Directory.Packages.props` or the `.csproj` files, which are
 flat lists of declared versions with **no graph at all**.
 
-**Measured effect** (eShopOnWeb): unique NuGet components went from **33 → 303**, transitive
-dependencies from **0 → 251**, total Trivy components from **34 → 1625**, and Syft's NuGet
-packages from **0 → 308**. Measured against a Black Duck run of the same repo, recall went from
-**10.2% → 98.7%**. Same repo, same scan, only difference is the lock files.
+**What the lock files buy you:** on a typical multi-project solution, `packages.lock.json` is the
+difference between a flat list of directly-declared packages and the full transitive graph, an
+order-of-magnitude increase in detected components, with transitive dependencies going from none
+to the bulk of the result. Same repo, same scan, only difference is the lock files.
 
 ## Python (bare `requirements.txt`)
 
@@ -172,7 +172,7 @@ build, *not* in the repo. The scanners read the `~/.m2` of the machine **running
 for Maven, do one of:
 
 1. **Run the `mvn dependency:go-offline` and the scan on the same machine (same user home).**
-   Simplest, and automatic if the client scans on its own build box.
+   Simplest, and automatic if you scan on your own build box.
 2. Otherwise, carry the warmed `~/.m2` to the scan machine (or point the tools at a project-local
    cache — Syft honors `SYFT_JAVA_MAVEN_LOCAL_REPOSITORY_DIR`).
 

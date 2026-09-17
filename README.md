@@ -1,15 +1,15 @@
-# DepMi (Dependency Miner)
+# DepMiner (Dependency Miner)
 
-Depminer mines dependency information from a target folder of repositories. As a
-**Voyager instrument** it runs three tools per mission, side by side:
+DepMiner mines dependency information from a target folder of repositories. As a
+**Voyager instrument** it runs three extraction mechanisms per mission, side by side:
 
-| Command name (use exactly this in mission.yml) | Tool | Output |
+| Command name (use exactly this in mission.yml) | Extraction mechanism | Output |
 |---|---|---|
-| `Mine Dependencies` | depminer | `results/depminer/` — mined manifests and lockfiles (`pom-*.xml`, `package-lock-*.json`, `Cargo.lock`, `go.sum`, …) + `index.json` + `skipped.json` |
-| `Syft SBOM` | Syft (bundled) | `results/syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
-| `Trivy Extract` | Trivy (bundled) | `results/trivy/` — `<project>.trivy.cdx.json` per project |
+| `Mine Dependencies` | **proprietary** | `results/depminer/` — mined manifests and lockfiles (`pom-*.xml`, `package-lock-*.json`, `Cargo.lock`, `go.sum`, …) + `index.json` + `skipped.json` |
+| `Syft SBOM` | **Syft SBOM** (bundled) | `results/syft/` — `<project>.syft.json`, `<project>.cdx.json`, `<project>.spdx.json` per project |
+| `Trivy Extract` | **Trivy SBOM** (bundled) | `results/trivy/` — `<project>.trivy.cdx.json` per project |
 
-Each tool owns a subfolder, so asking for "the Syft SBOMs" is a folder, not a guess at a filename
+Each mechanism owns a subfolder, so asking for "the Syft SBOMs" is a folder, not a guess at a filename
 suffix. The one file at the root of `results/` is `scrub-report.json`, shared by all three: it is
 the single place to look to find out whether anything in the run shipped carrying host data.
 
@@ -18,7 +18,7 @@ no telemetry, no version checks, no registry or Maven Central lookups. They only
 the target folder and write SBOM files. Their binaries are bundled in `bin/` for
 linux/macOS (amd64 + arm64) and Windows (amd64) — nothing is downloaded at run time.
 
-**All three tools run by default.** No configuration is needed for the full run.
+**All three extraction mechanisms run by default.** No configuration is needed for the full run.
 
 ## Getting complete results (transitive dependencies)
 
@@ -30,7 +30,7 @@ transitive tree instead of only the directly-declared dependencies.
 
 👉 **See [`PREP_GUIDE.md`](PREP_GUIDE.md) for the per-technology prep steps.**
 
-## Choosing which tools run
+## Choosing which mechanisms run
 
 ### Per mission — list only the commands you want
 
@@ -45,14 +45,15 @@ instruments:
 ```
 
 Command names must match the table above exactly. If `commands` is empty or missing,
-Voyager runs all three (see the mission.yml section of Voyager's own README; requires
-`runsAll: false` in the install's `.config.yml`, which voyenv-built bundles set).
+Voyager runs all three. For a narrower selection to be honoured, the install's `.config.yml`
+must set `runsAll: false`; it defaults to `true`, which runs every instrument it finds with all
+of their commands regardless of what the mission asked for.
 
 ### Per environment variable — explicit on/off switches
 
 | Variable | Effect when set to `"false"` |
 |---|---|
-| `DEPMINER_RUN_MINER` | skip depminer's own extraction |
+| `DEPMINER_RUN_MINER` | skip the proprietary extraction |
 | `DEPMINER_RUN_SYFT` | skip Syft |
 | `DEPMINER_RUN_TRIVY` | skip Trivy |
 
