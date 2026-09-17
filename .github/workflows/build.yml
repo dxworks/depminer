@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Docs match the pinned tool versions
+        run: ./scripts/check-docs-versions.sh
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:

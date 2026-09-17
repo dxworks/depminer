@@ -31,7 +31,7 @@ class ResolutionCheckTest {
         assertTrue(warning.contains("1 project(s) have no packages.lock.json"), warning)
         assertTrue(warning.contains("src/Web/Web.csproj".replace("/", File.separator)), warning)
         assertTrue(warning.contains("dotnet restore YourSolution.sln --use-lock-file"), warning)
-        assertTrue(warning.contains("10 %"), warning)
+        assertTrue(warning.contains("direct dependencies only"), warning)
     }
 
     @Test
@@ -124,7 +124,7 @@ class ResolutionCheckTest {
             System.setProperty("user.home", realHome)
         }
         // The wrappers rewrite $HOME to "~" in the SBOMs; a warning printed by the same run must
-        // not put the client's absolute layout back into the log.
+        // not put the host's absolute layout back into the log.
         assertTrue(!warning.contains(home.path), warning)
         assertTrue(warning.contains("~${File.separator}.m2${File.separator}repository"), warning)
     }

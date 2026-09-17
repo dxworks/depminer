@@ -46,14 +46,14 @@ environment:
   # Maven transitive deps, still 100% offline: the wrappers default
   # SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES and SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY to
   # "true" — resolve the full tree from the host's local Maven cache (~/.m2/repository)
-  # instead of the network. BOTH are required together; they only help when the client
-  # pre-populated ~/.m2 (see PREP_GUIDE.md), and with an empty cache they are harmless
+  # instead of the network. BOTH are required together; they only help when ~/.m2 has been
+  # pre-populated (see PREP_GUIDE.md), and with an empty cache they are harmless
   # no-ops. Without them, Syft reports only DECLARED Maven deps.
-  # Like DEPMINER_RUN_* above, they are deliberately NOT pinned here so clients can set
+  # Like DEPMINER_RUN_* above, they are deliberately NOT pinned here so users can set
   # them to "false" in mission.yml / .config.yml / the host shell. USE_NETWORK stays
   # "false" regardless, so no network call is ever made either way.
   SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES: "false"
-  # Dev dependencies are IN (Black Duck reports them): this Syft switch covers package-lock /
+  # Dev dependencies are IN (commercial SCA tools report them): this Syft switch covers package-lock /
   # yarn.lock devDependencies; the Trivy wrappers pass --include-dev-deps for the rest
   # (npm/yarn/pnpm, composer packages-dev, uv.lock dev groups, gradle). Lockfile parsing only — still no network.
   SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES: "true"

@@ -214,7 +214,7 @@ class SharedRootTest {
 
     @Test
     fun `a target folder named no-sanitize does not switch scrubbing off`() {
-        // A fail-open switch on the control that keeps a client's paths out of the results, so it
+        // A fail-open switch on the control that keeps host paths out of the results, so it
         // reads only the arguments meant for it - not the command, and not the target.
         assertTrue(sanitizeByDefault(arrayOf("extract", "no-sanitize")))
         assertTrue(sanitizeByDefault(arrayOf("extract", "/repos", "results")))

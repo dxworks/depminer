@@ -1,29 +1,30 @@
 # Installing
 
-[Quick Start](quickstart.md) assumes you already have a **Voyager installation that contains this
-instrument**. This page is how you get one.
+DepMiner is an instrument for **[Voyager](https://dxworks.org/voyager/)**, the DxWorks software
+analysis tool aggregator. This page assumes you already have a Voyager install. If you don't, set
+one up with the **[Voyager Quick Start](https://dxworks.org/voyager/quickstart.html)** first, then
+come back here.
 
-You do **not** need the official `voyager-full.zip` bundle, and you do not need to wait for DepMiner
-to be included in it. You can build your own Voyager install containing exactly the instruments you
-want — that is the normal way to try a new instrument version.
+## Add DepMiner to your Voyager install
 
-!!! info "Download size"
-    `depminer-voyager.zip` is large (**several hundred MB**) because it bundles the Syft and Trivy
-    binaries for five OS/architecture targets. That is what buys the 100%-offline guarantee: the
-    scan itself never downloads anything. See [Bundled Tools](tools.md).
+1. Download `depminer-voyager.zip` from the
+   [releases page](https://github.com/dxworks/depminer/releases) (a `v*-voyager` release).
+2. Unzip it into `instruments/`, so you get `instruments/depminer/`.
 
-## Option A — build your own bundle with voyenv (recommended)
+!!! info "`depminer-voyager.zip` is a few hundred MB"
+    It bundles executables for multiple operating systems, which is what buys the 100%-offline
+    scan. See [Bundled Tools](tools.md).
 
-`voyenv` is the tool that assembles a Voyager installation from a list of instruments. It needs
-**Node.js**.
+## Building a Voyager install with only DepMiner
 
-**1. Install voyenv**
+`voyenv` builds a fresh Voyager install from a list of instruments. Use it to keep DepMiner
+isolated from your other instruments, or to pin an exact version. Needs **Node.js**.
 
 ```bash
 npm i -g @dxworks/voyenv
 ```
 
-**2. Write a `voyenv.yml`** in an empty folder:
+Write a `voyenv.yml` in an empty folder:
 
 ```yaml
 name: voyager
@@ -31,66 +32,35 @@ voyager_version: v1.6.2
 
 instruments:
   - name: dxworks/depminer
-    tag: v0.4.0-voyager
+    tag: v0.4.0-voyager        # a real v*-voyager tag; omit the line for latest
     asset: depminer-voyager.zip
 
 tokens:
 runtimes:
 ```
 
-**3. Build the install**
-
 ```bash
 voyenv install
 ```
 
-This downloads Voyager itself plus each instrument listed, unpacks them, and writes a ready-to-use
-`voyager/` folder containing `voyager.sh` / `voyager.bat`, `dx-voyager.jar`, and
-`instruments/depminer/`. It also writes a `.config.yml` with `runsAll: false`, which is what lets a
-mission select individual commands.
+You get a `voyager/` folder with `voyager.sh` / `voyager.bat`, `dx-voyager.jar`,
+`instruments/depminer/`, and `.config.yml` already set to `runsAll: false`.
 
-`cd voyager/` and continue with [Quick Start](quickstart.md).
+## Running it
 
-!!! tip "Mixing in other instruments"
-    Add more entries under `instruments:` to build a bundle with several tools — the format is the
-    same for every dxworks instrument:
+Running is Voyager's job: see the
+**[Voyager Quick Start](https://dxworks.org/voyager/quickstart.html)**. The only DepMiner-specific
+part, choosing which mechanisms run, is on our [Quick Start](quickstart.md).
 
-    ```yaml
-      - name: dxworks/inspector-git
-        tag: v1.7.0-voyager
-        asset: iglog-voyager.zip
-    ```
+## Where the results land
 
-!!! note "Pinning versions"
-    The `tag:` line pins the exact instrument release, and must match a tag that actually exists —
-    check the [releases page](https://github.com/dxworks/depminer/releases) and use the newest
-    `v*-voyager` entry. Omit the line to always take the latest. Pinning is recommended when you
-    want a reproducible install — a rebuild then always produces the same bundle.
+One zip next to `voyager.sh`, named after the `mission:` field:
 
-## Option B — add it to an existing Voyager install
-
-If you already have a Voyager installation, you can drop the instrument in beside the others:
-
-1. Download `depminer-voyager.zip` from the
-   [releases page](https://github.com/dxworks/depminer/releases) (pick a `v*-voyager` release).
-2. Unzip it into the install's `instruments/` folder, so you end up with `instruments/depminer/`
-   containing `instrument.yml`, `depminer.jar`, and `bin/`.
-3. Confirm the install's `.config.yml` has `runsAll: false` — without it, mission command selection
-   is ignored and Voyager runs everything it finds.
-
-!!! note "Executable permissions are handled for you"
-    Some unzip implementations drop the executable bit on the bundled Syft/Trivy binaries. The
-    wrappers restore it themselves at run time, so this normally needs no action. If you do hit a
-    permission error, `chmod +x instruments/depminer/bin/*` clears it.
-
-## Verifying the install
-
-From inside the `voyager/` folder:
-
-```bash
-java -version                      # JDK 11+ must be present — see Quick Start prerequisites
-ls instruments/depminer            # expect: instrument.yml, depminer.jar, bin/, README.md
 ```
-
-Then run a mission as described in [Quick Start](quickstart.md). A successful run prints a summary
-with one line per command and writes `<mission>-voyager-results.zip`.
+<mission>-voyager-results.zip
+  depminer/results/
+    scrub-report.json
+    depminer/   mined manifests and lockfiles + index.json
+    syft/       Syft JSON, CycloneDX and SPDX, per project
+    trivy/      CycloneDX, per project
+```
