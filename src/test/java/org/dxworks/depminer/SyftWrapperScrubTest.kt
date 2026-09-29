@@ -7,7 +7,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * The SBOMs are the only artefacts that leave the client's machine, so bin/syft-wrapper.sh
+ * The SBOMs are the only artefacts that leave the scanned machine, so bin/syft-wrapper.sh
  * rewrites the host paths out of them. Every step of that scrub is a `sed` pipeline, and each one
  * can go wrong while still exiting 0 — which is how the wrapper came to print ">> syft done",
  * exit 0, and ship three SBOMs with the host layout still in them. These tests therefore drive the

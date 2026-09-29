@@ -40,7 +40,7 @@ if (-not $env:SYFT_JAVA_RESOLVE_TRANSITIVE_DEPENDENCIES) { $env:SYFT_JAVA_RESOLV
 if (-not $env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY) { $env:SYFT_JAVA_USE_MAVEN_LOCAL_REPOSITORY = "true" }
 $env:SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES = "false"
 # Include devDependencies from package-lock.json / yarn.lock (pure lockfile parsing, no
-# network). Black Duck reports them, so must we. Javascript is the only Syft cataloger with
+# network). Commercial SCA tools report them, so must we. Javascript is the only Syft cataloger with
 # this switch; the other ecosystems come from Trivy's --include-dev-deps (trivy-wrapper.ps1).
 $env:SYFT_JAVASCRIPT_INCLUDE_DEV_DEPENDENCIES = "true"
 $env:SYFT_PYTHON_SEARCH_REMOTE_LICENSES = "false"
@@ -86,8 +86,8 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("depminer-syft." + [System
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 # --- Host-path scrubbing -------------------------------------------------------
-# The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
-# carry the client's filesystem layout. Both tools record the scanned directory as an
+# The SBOMs are the ONLY artefacts that leave the scanned machine, so they must not
+# carry the host's filesystem layout. Both tools record the scanned directory as an
 # ABSOLUTE path in several places (Syft: source.name, source.metadata.path, the "file"
 # component in CycloneDX, the SPDX document name and namespace, plus HOME-derived cache
 # dirs under descriptor.configuration; Trivy: metadata.component.name). No CLI flag

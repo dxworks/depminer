@@ -70,8 +70,8 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("depminer-trivy." + [Syste
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 # --- Host-path scrubbing -------------------------------------------------------
-# The SBOMs are the ONLY artefacts that leave the client's machine, so they must not
-# carry the client's filesystem layout. Both tools record the scanned directory as an
+# The SBOMs are the ONLY artefacts that leave the scanned machine, so they must not
+# carry the host's filesystem layout. Both tools record the scanned directory as an
 # ABSOLUTE path in several places (Syft: source.name, source.metadata.path, the "file"
 # component in CycloneDX, the SPDX document name and namespace, plus HOME-derived cache
 # dirs under descriptor.configuration; Trivy: metadata.component.name). No CLI flag
@@ -262,7 +262,7 @@ function Remove-HostPaths([string]$repo, [string]$name, [string[]]$files) {
 # -------------------------------------------------------------------------------
 
 # --include-dev-deps keeps development-scoped packages (npm/yarn/pnpm devDependencies,
-# composer packages-dev, uv.lock dev groups, gradle) instead of pruning them: Black Duck reports them,
+# composer packages-dev, uv.lock dev groups, gradle) instead of pruning them: commercial SCA tools report them,
 # so must we. It only changes lockfile parsing - still no network.
 function Scan-One([string]$repo, [string]$name) {
     Write-Host ">> trivy scanning: $name"
