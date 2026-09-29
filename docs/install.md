@@ -18,7 +18,7 @@ come back here.
 ## Building a Voyager install with only DepMiner
 
 `voyenv` builds a fresh Voyager install from a list of instruments. Use it to keep DepMiner
-isolated from your other instruments, or to pin an exact version. Needs **Node.js**.
+isolated from your other instruments. Needs **Node.js**.
 
 ```bash
 npm i -g @dxworks/voyenv
@@ -32,8 +32,10 @@ voyager_version: v1.6.2
 
 instruments:
   - name: dxworks/depminer
-    tag: v0.4.0-voyager        # a real v*-voyager tag; omit the line for latest
     asset: depminer-voyager.zip
+    # No tag: voyenv installs the newest v*-voyager release.
+    # To pin a specific version instead, add a real tag from the releases page, e.g.
+    # tag: v0.5.1-voyager
 
 tokens:
 runtimes:
