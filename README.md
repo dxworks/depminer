@@ -24,7 +24,7 @@ linux/macOS (amd64 + arm64) and Windows (amd64) — nothing is downloaded at run
 
 Syft and Trivy read your project's **already-resolved** dependency state — lock files, or a
 warm local cache — they do **not** build your project. For most ecosystems the lock file is
-already committed and you need to do **nothing**. A few (Maven, Gradle, and a bare
+already committed and you need to do **nothing**. A few (Maven, Gradle, .NET, and a bare
 `requirements.txt`) need one minimal, one-time prep step first so the scan captures the full
 transitive tree instead of only the directly-declared dependencies.
 

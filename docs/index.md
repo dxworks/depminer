@@ -24,8 +24,8 @@ subfolder:
 - **`results/trivy/`** — CycloneDX, per project
 - **`results/scrub-report.json`** — shared by all three: whether anything shipped carrying host data
 
-Most ecosystems need no setup. Maven, Gradle and a bare `requirements.txt` need one one-time prep
-step first: see **[Preparing Your Project](prep-guide.md)**.
+Most ecosystems need no setup. Maven, Gradle, .NET and a bare `requirements.txt` need one one-time
+prep step first: see **[Preparing Your Project](prep-guide.md)**.
 
 ## Where to go next
 

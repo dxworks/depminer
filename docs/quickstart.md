@@ -48,6 +48,6 @@ depminer/results/
 
 ## Next
 
-- **[Preparing Your Project](prep-guide.md)** — Maven, Gradle and a bare `requirements.txt` need
-  one one-time step for a complete transitive scan.
+- **[Preparing Your Project](prep-guide.md)** — Maven, Gradle, .NET and a bare `requirements.txt`
+  need one one-time step for a complete transitive scan.
 - **[Configuration](configuration.md)** — running fewer than all three mechanisms.
