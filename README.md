@@ -97,23 +97,23 @@ bundles always contain the binaries).
 
 ## Summary Artifacts
 
-Depminer extraction writes dependency files and an index at `results/index.json`.
+Depminer extraction writes dependency files and an index at `results/depminer/index.json`.
 
 Use the Python helper to generate Voyager summary artifacts from extracted results:
 
 ```bash
-python3 lib/depminer-summary.py results
+python3 lib/depminer-summary.py results/depminer
 ```
 
 On Windows you can use:
 
 ```bash
-py -3 lib/depminer-summary.py results
+py -3 lib/depminer-summary.py results/depminer
 ```
 
 This command creates:
 
-- `results/summary.md`
-- `results/summary.html`
+- `results/depminer/summary.md`
+- `results/depminer/summary.html`
 
-If `results/index.json` is missing, the script generates missing summary artifacts.
+If `results/depminer/index.json` is missing, the script generates missing summary artifacts.

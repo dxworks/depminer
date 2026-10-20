@@ -25,16 +25,16 @@ actions:
           unix: bash "${instrumentPath}/bin/trivy-wrapper.sh" "${repo}" "${instrumentPath}/results/trivy" "${instrumentPath}/results"
 
   summary:
-    md-file: results/summary.md
-    html-file: results/summary.html
+    md-file: results/depminer/summary.md
+    html-file: results/depminer/summary.html
     category: External Libraries
     commands:
       generate-summary:
         id: generate-summary
         dir: ${instrumentPath}
         command:
-          windows: py -3 lib/depminer-summary.py "${instrumentPath}/results"
-          unix: python3 lib/depminer-summary.py "${instrumentPath}/results"
+          windows: py -3 lib/depminer-summary.py "${instrumentPath}/results/depminer"
+          unix: python3 lib/depminer-summary.py "${instrumentPath}/results/depminer"
 
   pack:
     with:
