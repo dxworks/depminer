@@ -9,3 +9,12 @@ node_modules
 
 .regression-work/
 regression-report/
+
+# bundled syft/trivy binaries (downloaded at release time, or locally for testing)
+bin/syft-*
+bin/trivy-*
+!bin/syft-wrapper.*
+!bin/trivy-wrapper.*
+.trivy-cache/
+/depminer/
+depminer-voyager.zip

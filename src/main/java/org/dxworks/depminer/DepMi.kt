@@ -7,6 +7,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.apache.commons.io.FileUtils
 import org.apache.commons.io.IOCase
+import org.apache.commons.io.filefilter.IOFileFilter
 import org.apache.commons.io.filefilter.NotFileFilter
 import org.apache.commons.io.filefilter.WildcardFileFilter
 import org.dxworks.argumenthor.Argumenthor
@@ -15,6 +16,7 @@ import org.dxworks.argumenthor.config.fields.impl.StringField
 import org.dxworks.argumenthor.config.sources.impl.ArgsSource
 import org.dxworks.argumenthor.config.sources.impl.EnvSource
 import org.dxworks.depminer.sanitization.Sanitizer
+import org.dxworks.depminer.sanitization.buildHostRules
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -67,7 +69,14 @@ fun main(args: Array<String>) {
         println("Target path ${targetPath.toFile().absolutePath} does not exist! Please specify a valid folder!")
         exitProcess(1)
     }
-    val depminerResultsPath = if (args.size >= 3) Paths.get(args[2]) else Paths.get("results")
+    // Positional args only; the flags (no-sanitize, --report-dir=...) may sit anywhere after them.
+    // A single leading "-" is enough: argumenthor's ArgsSource takes its options as -name=value
+    // (one dash), so "--" alone would let -sanitize.file=x.yml through as the results dir - and
+    // the results dir is deleted recursively below.
+    val depminerResultsPath =
+        args.drop(2).firstOrNull { !it.startsWith("-") && !it.equals("no-sanitize", ignoreCase = true) }
+            ?.let { Paths.get(it) } ?: Paths.get("results")
+    val scrubReportPath = reportDirArg(args)?.let { Paths.get(it) } ?: depminerResultsPath
 
     when (command) {
         "extract" -> {
@@ -76,7 +85,9 @@ fun main(args: Array<String>) {
             }
             depminerResultsPath.toFile().mkdirs()
             val sanitize = sanitizeByDefault(args)
-            extract(argumenthor, targetPath, depminerResultsPath, sanitize)
+            scrubReportPath.toFile().mkdirs()
+            clearSharedRoot(depminerResultsPath, scrubReportPath)
+            extract(argumenthor, targetPath, depminerResultsPath, scrubReportPath, sanitize)
         }
 
         "construct" -> {
@@ -100,13 +111,50 @@ fun main(args: Array<String>) {
 
 }
 
-private fun sanitizeByDefault(args: Array<String>): Boolean =
-    !(args.size >= 4 && args[3].equals("no-sanitize", ignoreCase = true))
+// Skips the command and the target, so a folder that happens to be named "no-sanitize" cannot
+// switch host-path scrubbing off. This is a fail-OPEN switch on the control that exists to keep
+// host paths out of the results, so it only ever reads the arguments meant for it.
+/**
+ * Clears the files sitting at the root of the shared results dir, the jar's own output folder
+ * being one level down inside it.
+ *
+ * Each of the three tools clears its own subfolder, and nothing else clears this level - so
+ * without this, whatever an earlier run left at the root would ship untouched: a flat SBOM from
+ * before the per-tool split, or a stale scrub-report.json still declaring that run clean. Before
+ * the split the jar deleted results/ wholesale and this came for free; it is the same job, and
+ * the jar still holds it because instrument.yml runs it first.
+ *
+ * Only regular files, so the tool subfolders are left to their owners. And only when the results
+ * dir is a DIRECT CHILD of the report dir, which is what the instrument layout looks like: it is
+ * the difference between clearing results/ and deleting files in whatever an unrelated
+ * --report-dir happens to point at.
+ */
+internal fun clearSharedRoot(resultsPath: Path, reportDir: Path) {
+    val results = resultsPath.toAbsolutePath().normalize()
+    val report = reportDir.toAbsolutePath().normalize()
+    if (results == report || results.parent != report) return
+    report.toFile().listFiles()?.filter { it.isFile }?.forEach { it.delete() }
+}
+
+internal fun sanitizeByDefault(args: Array<String>): Boolean =
+    args.drop(2).none { it.equals("no-sanitize", ignoreCase = true) }
+
+/**
+ * `--report-dir=<path>` - where scrub-report.json goes, when that is not the results dir.
+ *
+ * Each tool now writes into its own subfolder (results/depminer, results/syft, results/trivy)
+ * but the scrub report stays ONE file at the root of results/, so a consumer has a single place
+ * to look to find out whether anything in the run shipped unclean. The wrappers take the same
+ * path as their third argument; see instrument.yml.
+ */
+private fun reportDirArg(args: Array<String>): String? =
+    args.firstOrNull { it.startsWith("--report-dir=") }?.substringAfter("=")?.takeIf { it.isNotBlank() }
 
 private fun extract(
     argumenthor: Argumenthor,
     target: Path,
     depminerResultsPath: Path,
+    scrubReportPath: Path,
     sanitize: Boolean
 ) {
 
@@ -117,6 +165,8 @@ private fun extract(
         argumenthor.getValue<String>(IGNORE_FILE).also { println("Ignoring all files from ${File(it).absolutePath}") }
 
     val blacklistedGlobs: ExcludedPaths = yamlMapper.readValue(File(ignoreFile))
+
+    val dirFilter = NotFileFilter(WildcardFileFilter.builder().setWildcards(blacklistedGlobs.dirs.orEmpty()).get())
 
     println("Reading Files...")
 
@@ -131,26 +181,37 @@ private fun extract(
                         .get()
                 )
             ),
-            NotFileFilter(WildcardFileFilter.builder().setWildcards(blacklistedGlobs.dirs.orEmpty()).get())
+            dirFilter
         )
 
+    // index.json: saved name -> path under the target (first segment = repo). skipped.json: the
+    // same key for files that matched but did NOT ship, with the reason, so a consumer can tell a
+    // file that was never there from one that was dropped.
     val resultsMap = mutableMapOf<String, String>()
+    val skippedMap = mutableMapOf<String, Map<String, String>>()
 
     println("Writing Results...")
+
+    fun save(file: File, savedName: String) {
+        val rel = file.relativeTo(target.toFile()).normalize().toString()
+        try {
+            file.copyTo(depminerResultsPath.resolve(savedName).toFile())
+            resultsMap[savedName] = rel
+        } catch (e: Exception) {
+            println("Could not copy $rel: ${e.message}")
+            skippedMap[savedName] = mapOf("path" to rel, "reason" to "copy-failed: ${e.message}")
+        }
+    }
 
     packageFiles.groupBy { it.name.lowercase() }.forEach { entry ->
         if (entry.value.size > 1) {
             entry.value.forEachIndexed { index, file: File ->
                 val newName =
                     "${file.nameWithoutExtension}-$index${file.extension.let { if (it.isNotEmpty()) ".$it" else "" }}"
-                file.copyTo(depminerResultsPath.resolve(newName).toFile())
-                resultsMap[newName] = file.relativeTo(target.toFile()).normalize().toString()
+                save(file, newName)
             }
         } else {
-            entry.value.firstOrNull()?.also {
-                it.copyTo(depminerResultsPath.resolve(it.name).toFile())
-                resultsMap[it.name] = it.relativeTo(target.toFile()).normalize().toString()
-            }
+            entry.value.firstOrNull()?.also { save(it, it.name) }
         }
     }
 
@@ -161,11 +222,48 @@ private fun extract(
         val sanitizeFile = argumenthor.getValue<String>(SANITIZE_FILE)
         if (sanitizeFile != null) {
             println("Sanitizing files using patterns from ${File(sanitizeFile).absolutePath}")
-            Sanitizer().sanitizeFiles(depminerResultsPath, sanitizeFile)
+            // The copied files carry the host's layout - project.assets.json holds the absolute
+            // path of every csproj, the NuGet package folder and the restore config - and
+            // sanitize.yml has credential patterns only. Scrub those paths too, then check the
+            // emitted bytes and record anything still carrying them in scrub-report.json.
+            val outcome = Sanitizer().sanitizeFiles(
+                depminerResultsPath, sanitizeFile,
+                buildHostRules(target, listOf(depminerResultsPath, scrubReportPath), System.getenv("HOME")),
+                scrubReportPath
+            )
+            // A file the sanitizer deleted (private key inside) used to stay in index.json as if it
+            // had shipped, and nothing said otherwise. It comes out of the index and goes into
+            // skipped.json with its original path and the reason, so an absence is explained rather
+            // than discovered.
+            outcome.skipped.forEach { s ->
+                skippedMap[s.file] = mapOf("path" to (resultsMap.remove(s.file) ?: ""), "reason" to s.reason)
+            }
+            if (outcome.skipped.isNotEmpty()) {
+                jacksonObjectMapper().writerWithDefaultPrettyPrinter()
+                    .writeValue(depminerResultsPath.resolve("index.json").toFile(), resultsMap)
+            }
         } else {
             println("Sanitization file path is null, skipping sanitization")
         }
     }
 
+    jacksonObjectMapper().writerWithDefaultPrettyPrinter()
+        .writeValue(depminerResultsPath.resolve("skipped.json").toFile(), skippedMap)
+
     println("\nDepMi (Dependency Miner) finished successfully! Please view your results at ${depminerResultsPath.toFile().absolutePath}")
+
+    reportResolutionState(target.toFile(), dirFilter)
+}
+
+/**
+ * Advisory only: prints a warning for every stack found in an unresolved state. Never fails the
+ * run, never changes the exit code, never changes what is extracted.
+ */
+private fun reportResolutionState(target: File, dirFilter: IOFileFilter) {
+    val warnings = runCatching { ResolutionCheck.warnings(target, dirFilter) }.getOrElse { emptyList() }
+    if (warnings.isEmpty()) return
+
+    println("\n─── Resolution check ───────────────────────────────────────────────")
+    warnings.forEach { println("$it\n") }
+    println("These stacks will be under-reported unless prepared. This is a warning, not an error.")
 }

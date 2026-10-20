@@ -1,3 +1,18 @@
+# Never copied, whatever depminer.yml matches. These are package-manager CONFIG files: no
+# dependency information, and the usual home of registry tokens (_authToken, npmAuthToken,
+# apikeys, index-url credentials). A lockfile records what was resolved; these record how to log in.
 files:
+  - .npmrc
+  - .yarnrc
+  - .yarnrc.yml
+  - nuget.config
+  - pip.conf
+  - pip.ini
+  - .pypirc
+  - settings.xml
+  - gradle.properties
+  - .env
+  - '.env.*'
 dirs:
   - '.git'
+  - node_modules

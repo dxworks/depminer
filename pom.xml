@@ -14,6 +14,18 @@
         <main.class>org.dxworks.depminer.DepMiKt</main.class>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>5.14.2</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
@@ -22,19 +34,24 @@
         </dependency>
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
-            <artifactId>kotlin-test</artifactId>
+            <artifactId>kotlin-test-junit5</artifactId>
             <version>${kotlin.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
-            <version>2.21.1</version>
+            <version>2.21.7</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-kotlin</artifactId>
-            <version>2.21.1</version>
+            <version>2.21.7</version>
         </dependency>
         <dependency>
             <groupId>commons-io</groupId>
@@ -74,6 +91,11 @@
                 <configuration>
                     <jvmTarget>21</jvmTarget>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
