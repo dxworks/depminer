@@ -67,6 +67,7 @@ cp sanitize.yml depminer/sanitize.yml
 cp .ignore.yml depminer/.ignore.yml
 cp lib/*.py depminer/lib
 cp lib/templates/*.html depminer/lib/templates
+cp dependency-manager-map.yml depminer/dependency-manager-map.yml
 
 cp bin/syft-wrapper.sh depminer/bin/syft-wrapper.sh
 cp bin/syft-wrapper.ps1 depminer/bin/syft-wrapper.ps1
