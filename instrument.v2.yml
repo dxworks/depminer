@@ -33,8 +33,8 @@ actions:
         id: generate-summary
         dir: ${instrumentPath}
         command:
-          windows: py -3 lib/depminer-summary.py "${instrumentPath}/results/depminer"
-          unix: python3 lib/depminer-summary.py "${instrumentPath}/results/depminer"
+          windows: py -3 --version >nul 2>nul & if not errorlevel 1 (py -3 lib/depminer-summary.py "${instrumentPath}/results/depminer") else (python lib/depminer-summary.py "${instrumentPath}/results/depminer")
+          unix: if command -v python3 >/dev/null 2>&1; then python3 lib/depminer-summary.py "${instrumentPath}/results/depminer"; else python lib/depminer-summary.py "${instrumentPath}/results/depminer"; fi
 
   pack:
     with:
