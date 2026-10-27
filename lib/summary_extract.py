@@ -144,8 +144,6 @@ def _create_payload(
 
 
 def _resolve_status(entries_count: int, missing_files_count: int, invalid_entries_count: int) -> str:
-    if entries_count == 0:
-        return 'failed'
     if missing_files_count > 0 or invalid_entries_count > 0:
         return 'partial'
     return 'success'
