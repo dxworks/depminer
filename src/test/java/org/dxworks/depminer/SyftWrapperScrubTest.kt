@@ -176,6 +176,34 @@ class SyftWrapperScrubTest {
     }
 
     /**
+     * macOS (BSD) sed cuts every script LINE at 2048 bytes. The rules used to be joined with ";"
+     * into one line, so a deep target path pushed the script past that limit: sed failed with
+     * "unterminated substitute pattern" on every file and nothing was scrubbed, neither the path
+     * nor the URL credentials. A short temp path never reached the limit, so the tests above
+     * passed throughout. On GNU sed this test passes either way.
+     */
+    @Test
+    fun `scrubs a target whose path makes the rules longer than 2048 bytes`() {
+        val stubs = tempDir("depminer-stubs")
+        stubSyft(stubs)
+        val deep = (1..12).joinToString("/") { "client-folder-with-a-long-name-number-$it" }
+        val target = File(tempDir("depminer-target"), deep).also { File(it, "proj").mkdirs() }
+        assertTrue(target.absolutePath.length > 500, "the path must be long enough to cross the limit")
+        val out = tempDir("depminer-out")
+
+        assertEquals(0, runWrapper(stubs, target, out))
+
+        val files = emitted(out)
+        assertTrue(files.any { it.name == "proj.syft.json" }, files.map { it.name }.toString())
+        files.forEach {
+            val text = it.readText()
+            assertTrue(!text.contains(deep), "host path left in ${it.name}: $text")
+            assertTrue(!text.contains(credential), "registry credentials left in ${it.name}: $text")
+        }
+        assertTrue(!report(out).contains("proj.syft.json"), "the scrub failed and was reported: ${report(out)}")
+    }
+
+    /**
      * The regression this file exists for. The escaping pipeline is stubbed so that it exits 0
      * with TRUNCATED output: every rule then matches only a prefix of the host path, so the scrub
      * "succeeds" while the host layout survives in the SBOM — and before, NOTHING said so. The

@@ -88,8 +88,8 @@ files are still written.
 
 | Tool | Version | Source |
 |---|---|---|
-| Syft | 1.46.0 | github.com/anchore/syft (pinned in `scripts/prepare-release-voyager.sh`) |
-| Trivy | 0.72.0 | github.com/aquasecurity/trivy (pinned in `scripts/prepare-release-voyager.sh`) |
+| Syft | 1.57.0 | github.com/anchore/syft (pinned in `scripts/prepare-release-voyager.sh`) |
+| Trivy | 0.76.2 | github.com/aquasecurity/trivy (pinned in `scripts/prepare-release-voyager.sh`) |
 
 The wrappers in `bin/` pick the binary matching the host OS/arch and fall back to a
 tool on PATH only when no bundled binary exists (a development convenience — release
