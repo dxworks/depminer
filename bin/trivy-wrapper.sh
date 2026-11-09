@@ -103,7 +103,11 @@ _json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # is stripped here. A fixed script, so nothing about it can be mis-escaped. It requires the
 # "@" to come before the first "/", which is what separates credentials from an ordinary
 # path such as https://github.com/scope/pkg@1.2.3.
-_CRED_RULE='s|://[^/"[:space:]]*@|://|g;'
+# One sed command PER LINE, never joined with ";": macOS (BSD) sed cuts each script line at
+# 2048 bytes, and with a long target/HOME/TMPDIR path the joined script passed that limit and
+# failed with "unterminated substitute pattern" on every file, so nothing was scrubbed.
+_CRED_RULE='s|://[^/"[:space:]]*@|://|g
+'
 
 # --- The withheld-file report --------------------------------------------------
 # A file that still carries a host path after scrubbing IS STILL EMITTED - Alex's call. Nothing
@@ -196,7 +200,9 @@ _rule() {
   # starts with the same characters - with HOME=/Users/alex, "/Users/alexandra/x" came out
   # as "~andra/x": corrupted, and still carrying part of the host layout. Anything the
   # anchors now miss is caught by _verify_scrubbed instead of passing silently.
-  _scrub_script="${_scrub_script}s/${re}\//${rep}\//g;s/${re}\"/${rep}\"/g;"
+  _scrub_script="${_scrub_script}s/${re}\//${rep}\//g
+s/${re}\"/${rep}\"/g
+"
   # The rule class and the unescaped literal, for the post-scrub check. Tab-separated: a
   # path may contain spaces, but the class never does.
   _scrub_forbidden="${_scrub_forbidden}${class}	${from}
