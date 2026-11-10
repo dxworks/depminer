@@ -1,0 +1,58 @@
+name: depminer
+id: depminer
+version: 2.12.0
+
+actions:
+  verify:
+    with:
+      requirements:
+        - name: Java 21+
+          min: 21.0.0
+          command: java -version
+          match:
+            - 'version "(?<version>.+)"'
+        - name: Python 3.9+
+          min: 3.9.0
+          command:
+            windows: py -3 --version >nul 2>nul & if not errorlevel 1 (py -3 --version) else (python --version)
+            unix: if command -v python3 >/dev/null 2>&1; then python3 --version; else python --version; fi
+          match:
+            - 'Python (?<version>.+)'
+  start:
+    commands:
+      mine-dependencies:
+        id: mine-dependencies
+        dir: ${instrumentPath}
+        command:
+          windows: if /I "%DEPMINER_RUN_MINER%"=="false" (echo depminer disabled - skipping) else (java -jar depminer.jar extract "${repo}" "${instrumentPath}/results/depminer" "--report-dir=${instrumentPath}/results")
+          unix: if [ "${DEPMINER_RUN_MINER:-true}" = "false" ]; then echo "depminer disabled - skipping"; else java -jar depminer.jar extract "${repo}" "${instrumentPath}/results/depminer" "--report-dir=${instrumentPath}/results"; fi
+      syft-sbom:
+        id: syft-sbom
+        dir: ${instrumentPath}
+        command:
+          windows: powershell -ExecutionPolicy Bypass -File "${instrumentPath}/bin/syft-wrapper.ps1" "${repo}" "${instrumentPath}/results/syft" "${instrumentPath}/results"
+          unix: bash "${instrumentPath}/bin/syft-wrapper.sh" "${repo}" "${instrumentPath}/results/syft" "${instrumentPath}/results"
+      trivy-extract:
+        id: trivy-extract
+        dir: ${instrumentPath}
+        command:
+          windows: powershell -ExecutionPolicy Bypass -File "${instrumentPath}/bin/trivy-wrapper.ps1" "${repo}" "${instrumentPath}/results/trivy" "${instrumentPath}/results"
+          unix: bash "${instrumentPath}/bin/trivy-wrapper.sh" "${repo}" "${instrumentPath}/results/trivy" "${instrumentPath}/results"
+
+  summary:
+    md-file: results/depminer/summary.md
+    html-file: results/depminer/summary.html
+    category: External Libraries
+    commands:
+      generate-summary:
+        id: generate-summary
+        dir: ${instrumentPath}
+        command:
+          windows: py -3 --version >nul 2>nul & if not errorlevel 1 (py -3 lib/depminer-summary.py "${instrumentPath}/results/depminer") else (python lib/depminer-summary.py "${instrumentPath}/results/depminer")
+          unix: if command -v python3 >/dev/null 2>&1; then python3 lib/depminer-summary.py "${instrumentPath}/results/depminer"; else python lib/depminer-summary.py "${instrumentPath}/results/depminer"; fi
+
+  pack:
+    with:
+      locations:
+        - source: ${instrumentDir}/results
+          destination: /results

@@ -56,13 +56,25 @@ fetch_verified() {
 rm -rf depminer depminer-voyager.zip
 
 mkdir -p depminer/results/depminer depminer/results/syft depminer/results/trivy depminer/bin
+mkdir -p depminer/lib/templates
 cp README.md depminer/README.md
 cp PREP_GUIDE.md depminer/PREP_GUIDE.md
 cp target/depminer.jar depminer/depminer.jar
 cp instrument.yml depminer/instrument.yml
+cp instrument.v2.yml depminer/instrument.v2.yml
+
+# The tool's version, from the release tag, in both manifests (V1 and V2)
+for f in depminer/instrument.yml depminer/instrument.v2.yml; do
+  awk -v v="$VERSION" '!/^version:/ {print} /^name:/ {print "version: " v}' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+done
+
 cp depminer.yml depminer/depminer.yml
 cp sanitize.yml depminer/sanitize.yml
 cp .ignore.yml depminer/.ignore.yml
+cp lib/*.py depminer/lib
+cp lib/templates/*.html depminer/lib/templates
+cp dependency-manager-map.yml depminer/dependency-manager-map.yml
 
 cp bin/syft-wrapper.sh depminer/bin/syft-wrapper.sh
 cp bin/syft-wrapper.ps1 depminer/bin/syft-wrapper.ps1
