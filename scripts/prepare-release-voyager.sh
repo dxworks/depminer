@@ -4,24 +4,24 @@ set -euo pipefail
 VERSION="${1:?Usage: prepare-release-voyager.sh <version>}"
 
 # Pinned tool versions bundled into the Voyager instrument.
-SYFT_VERSION="1.46.0"
-TRIVY_VERSION="0.72.0"
+SYFT_VERSION="1.57.0"
+TRIVY_VERSION="0.76.2"
 
 # Official sha256 checksums for the pinned versions, taken from each project's release
 # checksums file (syft_<v>_checksums.txt / trivy_<v>_checksums.txt on the GitHub release).
 # Bump these together with the versions above — a version bump without new checksums
 # fails fast with "no pinned checksum".
 CHECKSUMS="
-d654f678b709eb53c393d38519d5ed7d2e57205529404018614cfefa0fb2b5ca  syft_1.46.0_linux_amd64.tar.gz
-9fafef4db4f032ce81008d3a1529985d41ceb6ccdf2b388c9ce2f1ed7d32082e  syft_1.46.0_linux_arm64.tar.gz
-5c983db13533de02e5331aae88091116f25365840741f86234084a30166672a7  syft_1.46.0_darwin_amd64.tar.gz
-cd4e2c40e075684a5746d8959f76b6572bb2d2dda8cf6877dbfff1cc0baeea01  syft_1.46.0_darwin_arm64.tar.gz
-1e515c1ac4bc65917f8d0a52b6ae0e611082779cbf2da9d470282158dd24ea13  syft_1.46.0_windows_amd64.zip
-bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea  trivy_0.72.0_Linux-64bit.tar.gz
-2ca2c023109c2db6b2b77366b6717291452d4531167377d95c79547f0c8e3467  trivy_0.72.0_Linux-ARM64.tar.gz
-ee5e60df8a98e5b89fd74a6d86f9e5c7e9a266a35002cb1e43291698b3bfee08  trivy_0.72.0_macOS-64bit.tar.gz
-88f208680dc05da2b459e19b4f5aa2b4dc7c2117892ba4aab2ae63baba330016  trivy_0.72.0_macOS-ARM64.tar.gz
-ed3cf122060f61818fe1f735fd97557954e16e10bc8b058af9852271cf2e91b3  trivy_0.72.0_windows-64bit.zip
+9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704  syft_1.57.0_linux_amd64.tar.gz
+410cbfa0ae0f63246bc0057843760b1de2833cd23919e025e368fd7681308cdb  syft_1.57.0_linux_arm64.tar.gz
+f0e8568a9429ac1c8e4ae9e9c399fede5fcd09e4a7348b47b0532baf1c6500c1  syft_1.57.0_darwin_amd64.tar.gz
+17012a5a110323bb1069e513a8665f1ae445905c56b4e3f9a9df4f95c5bb6161  syft_1.57.0_darwin_arm64.tar.gz
+06e9663e55f7f38ff966710670fbe0763182c621f7ac2f191bcb209a6dfbd969  syft_1.57.0_windows_amd64.zip
+bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  trivy_0.76.2_Linux-64bit.tar.gz
+ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3  trivy_0.76.2_Linux-ARM64.tar.gz
+e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b  trivy_0.76.2_macOS-64bit.tar.gz
+ae7ea358326960406b703c77b2ac490190797d80b306b5b50c2a27221da0a5b8  trivy_0.76.2_macOS-ARM64.tar.gz
+691f737a7e5566a673c3a74dab9160552ec32101e953b659e5c77443d16dddb6  trivy_0.76.2_windows-64bit.zip
 "
 
 sha256() {
