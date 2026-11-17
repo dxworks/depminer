@@ -7,7 +7,7 @@ anything.
 
 | Tool | Version | Source |
 |---|---|---|
-| Syft | 1.57.0 | [github.com/anchore/syft](https://github.com/anchore/syft) |
+| Syft | 1.57.1 | [github.com/anchore/syft](https://github.com/anchore/syft) |
 | Trivy | 0.76.2 | [github.com/aquasecurity/trivy](https://github.com/aquasecurity/trivy) |
 
 Both are pinned in `scripts/prepare-release-voyager.sh` and bundled for **Linux** and **macOS**
