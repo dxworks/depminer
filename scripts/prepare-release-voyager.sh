@@ -4,7 +4,7 @@ set -euo pipefail
 VERSION="${1:?Usage: prepare-release-voyager.sh <version>}"
 
 # Pinned tool versions bundled into the Voyager instrument.
-SYFT_VERSION="1.57.0"
+SYFT_VERSION="1.55.0"
 TRIVY_VERSION="0.75.0"
 
 # Official sha256 checksums for the pinned versions, taken from each project's release
