@@ -56,5 +56,8 @@
         "command": "depminerCommand"
       }
     ]
+  },
+  "engines": {
+    "node": ">=26"
   }
 }
