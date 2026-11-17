@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: '0 5 * * *'   # daily 05:00 UTC
   workflow_dispatch:
+  push:
+    branches: [test_scanner_autoupdate]   # test only
 
 permissions:
   contents: read

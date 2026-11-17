@@ -5,7 +5,7 @@ VERSION="${1:?Usage: prepare-release-voyager.sh <version>}"
 
 # Pinned tool versions bundled into the Voyager instrument.
 SYFT_VERSION="1.57.0"
-TRIVY_VERSION="0.76.2"
+TRIVY_VERSION="0.75.0"
 
 # Official sha256 checksums for the pinned versions, taken from each project's release
 # checksums file (syft_<v>_checksums.txt / trivy_<v>_checksums.txt on the GitHub release).
