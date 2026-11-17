@@ -14,11 +14,11 @@ for cmd in gh cosign jq; do
 done
 
 # Newest non-draft, non-prerelease tag of <owner/repo> published at least MIN_AGE_DAYS before the
-# last Monday 05:00 UTC (same cutoff as the depinder server), without the leading "v".
+# last daily 05:00 UTC (same cutoff as the depinder server), without the leading "v".
 newest_settled() {
-  local now week=604800 monday=363600 cutoff   # monday: 1970-01-05 05:00 UTC
+  local now day=86400 run=18000 cutoff   # run: 05:00 UTC
   now=$(date -u +%s)
-  cutoff=$(( now - (now - monday) % week - MIN_AGE_DAYS * 86400 ))
+  cutoff=$(( now - (now - run) % day - MIN_AGE_DAYS * day ))
   gh api "repos/$1/releases?per_page=30" --jq "
     [ .[] | select(.draft == false and .prerelease == false)
           | select((.published_at | fromdateiso8601) <= $cutoff) ][0].tag_name // empty" \
@@ -67,7 +67,7 @@ parts=()
 [ -n "$trivy_new" ] && parts+=("Trivy $trivy_old → $trivy_new")
 
 if [ ${#parts[@]} -eq 0 ]; then
-  echo "Scanners already current (Syft $syft_old, Trivy $trivy_old; cooldown: ${MIN_AGE_DAYS} days before last Monday 05:00 UTC)"
+  echo "Scanners already current (Syft $syft_old, Trivy $trivy_old; cooldown: ${MIN_AGE_DAYS} days before today's 05:00 UTC)"
   [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed=false" >> "$GITHUB_OUTPUT"
   exit 0
 fi

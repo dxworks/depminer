@@ -1,10 +1,10 @@
 name: Scanner Update
 
-# Weekly bump of the bundled scanners; needs secret SCANNER_BOT_TOKEN and auto-merge enabled.
+# Daily bump of the bundled scanners; needs secret SCANNER_BOT_TOKEN and auto-merge enabled.
 
 on:
   schedule:
-    - cron: '0 5 * * 1'   # Mondays 05:00 UTC
+    - cron: '0 5 * * *'   # daily 05:00 UTC
   workflow_dispatch:
 
 permissions:
