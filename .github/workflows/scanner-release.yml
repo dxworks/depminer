@@ -1,0 +1,44 @@
+name: Scanner Release
+
+# Tags the next patch release after a bot bump, if nothing else is unreleased.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/prepare-release-voyager.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scanner-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: startsWith(github.event.head_commit.message, 'Bump bundled scanners:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.SCANNER_BOT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Tag next patch release
+        run: |
+          last="$(git tag -l 'v*-voyager' --sort=-v:refname | head -1)"
+          [ -n "$last" ] || { echo "::error::no previous v*-voyager tag"; exit 1; }
+          others="$(git log --format=%s "$last"..HEAD | grep -v '^Bump bundled scanners:' || true)"
+          if [ -n "$others" ]; then
+            echo "::notice::Not releasing: main has unreleased changes besides scanner bumps:"
+            echo "$others"
+            exit 0
+          fi
+          base="${last#v}"; base="${base%-voyager}"
+          IFS=. read -r major minor patch <<< "$base"
+          next="${major}.${minor}.$((patch + 1))"
+          git tag "v${next}"
+          git tag "v${next}-voyager"
+          git push origin "v${next}" "v${next}-voyager"
+          echo "Tagged v${next} and v${next}-voyager"
