@@ -1,6 +1,6 @@
 name: Scanner Update
 
-# Daily bump of the bundled scanners; needs secret SCANNER_BOT_TOKEN and auto-merge enabled.
+# Daily bump of the bundled scanners; scanner-release.yml then releases it. Needs secret SCANNER_BOT_TOKEN and auto-merge.
 
 on:
   schedule:
@@ -99,7 +99,7 @@ jobs:
             - Checksums taken from each publisher's checksums file after its Sigstore signature verified against the publisher's release workflow.
             - The Voyager bundle was built with them (every download checked) and both wrappers found packages in a fixture.
 
-            Merges itself when the required checks pass, unless the new version adds a HIGH/CRITICAL finding. Releases stay manual.
+            Merges itself when the required checks pass, unless the new version adds a HIGH/CRITICAL finding. Once merged, Scanner Release tags the next patch version (x.y.Z+1) and publishes it.
 
       - name: Report a blocked bump
         if: steps.pr.outputs.pull-request-number != '' && steps.bump.outputs.blocked == 'true'
