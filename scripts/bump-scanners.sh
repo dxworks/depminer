@@ -2,6 +2,7 @@
 # Bumps the bundled Syft/Trivy pins, checksums and docs to the newest signed, settled releases;
 # earlier when a release fixes a vulnerability of the pinned one. Needs trivy to compare them.
 set -euo pipefail
+shopt -s inherit_errexit 2>/dev/null || true   # set -e also inside $(...) (bash 4.4+)
 
 MIN_AGE_DAYS="${MIN_AGE_DAYS:-7}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,12 +28,17 @@ fetch_assets() {
   for f in "$@"; do curl -fsSL --retry 3 -o "$dir/$f" "https://github.com/$repo/releases/download/$tag/$f"; done
 }
 
-# Newest non-draft, non-prerelease tag of <owner/repo> published at or before <epoch>, without the "v".
+# Highest plain x.y.z release of <owner/repo> (not draft or prerelease) published at or before
+# <epoch>, without the "v". Fails when the API answers nothing.
 newest_before() {
-  public_api "repos/$1/releases?per_page=30" | jq -r "
+  local releases
+  releases="$(public_api "repos/$1/releases?per_page=30")"
+  [ "$(jq 'length' <<< "$releases")" -gt 0 ] || { echo "ERROR: no releases of $1 from the GitHub API" >&2; exit 1; }
+  jq -r --argjson cutoff "$2" '
     [ .[] | select(.draft == false and .prerelease == false)
-          | select((.published_at | fromdateiso8601) <= $2) ][0].tag_name // empty" \
-    | sed 's/^v//'
+          | select((.published_at | fromdateiso8601) <= $cutoff)
+          | .tag_name | ltrimstr("v") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) ]
+    | sort_by(split(".") | map(tonumber)) | last // empty' <<< "$releases"
 }
 
 # Cooldown cutoff: MIN_AGE_DAYS before the last daily 05:00 UTC (same as the depinder server).
@@ -49,7 +55,8 @@ verified_lines() {
   cosign verify-blob "$dir/$sums" \
     --bundle "$dir/$sums.sigstore.json" \
     --certificate-identity-regexp "^https://github\.com/${repo//./\\.}/\.github/workflows/" \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com >&2
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com >&2 \
+    || { echo "ERROR: Sigstore verification failed for $sums" >&2; exit 1; }
   local asset line
   for asset in "$@"; do
     line="$(awk -v a="$asset" '$2 == a {print $1"  "$2}' "$dir/$sums")"
@@ -90,7 +97,10 @@ findings() {
     fetch_assets "$repo" "v$version" "$dir" "$asset"
     [ "$(sha256 "$dir/$asset")" = "$expected" ] || { echo "ERROR: checksum mismatch for $asset" >&2; exit 1; }
     tar -xzf "$dir/$asset" -C "$dir/bin" "$tool"
-    trivy rootfs --quiet --scanners vuln --format json "$dir/bin" > "$dir/scan.json"
+    trivy rootfs --quiet --scanners vuln --list-all-pkgs --format json "$dir/bin" > "$dir/scan.json"
+    # No modules read means no findings either: that must not pass for "fixes everything".
+    jq -e '[.Results[]?.Packages[]?] | length > 0' "$dir/scan.json" >/dev/null \
+      || { echo "ERROR: trivy read no Go modules from $tool $version" >&2; exit 1; }
     jq -r '.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.PkgName) \(.Severity)"' "$dir/scan.json" \
       | LC_ALL=C sort -u > "$out"
   fi
@@ -103,10 +113,10 @@ ids() { awk '{print $1" "$2}' | LC_ALL=C sort -u; }
 # The newest release is taken before the cooldown when it fixes a finding of the pinned one and
 # adds no HIGH/CRITICAL; otherwise the newest settled one, blocked if it adds a HIGH/CRITICAL.
 pick() {
-  local repo="$1" tool="$2" pinned="$3" asset="$4" fresh settled fixed added
+  local repo="$1" tool="$2" pinned="$3" asset="$4" latest ripe fresh settled fixed added
   PICK=""; PICK_NOTE=""; PICK_BLOCK=""
-  fresh="$(newer "$pinned" "$(newest_before "$repo" "$NOW")")"
-  settled="$(newer "$pinned" "$(newest_before "$repo" "$CUTOFF")")"
+  latest="$(newest_before "$repo" "$NOW")"; ripe="$(newest_before "$repo" "$CUTOFF")"
+  fresh="$(newer "$pinned" "$latest")"; settled="$(newer "$pinned" "$ripe")"
   [ -n "$fresh" ] || return 0
   findings "$repo" "$tool" "$pinned" "$asset" pinned > "$WORK/scan/old"
   if [ "$fresh" != "$settled" ]; then
