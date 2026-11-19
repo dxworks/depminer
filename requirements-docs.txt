@@ -1,3 +1,0 @@
-# Pinned so `mkdocs build` is byte-reproducible across CI runs and machines.
-# Bump deliberately, not automatically.
-mkdocs-material==9.7.7

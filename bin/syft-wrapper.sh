@@ -55,18 +55,39 @@ case "$os" in
   *)      os="linux"  ;;
 esac
 
-BIN="${HERE}/syft-${os}-${arch}"
+BIN_NAME="syft-${os}-${arch}"
+BIN="${HERE}/${BIN_NAME}"
 
-# Some unzip implementations (e.g. voyenv's) drop unix exec bits — restore ours.
-if [[ -f "$BIN" && ! -x "$BIN" ]]; then
-  chmod +x "$BIN" 2>/dev/null || true
+# Restore exec bits some unzips drop; if that fails, say why (relative paths only, logs reach us).
+PROBLEM=""
+if [[ -e "$BIN" && ! -f "$BIN" ]]; then
+  PROBLEM="bin/${BIN_NAME} exists but is not a regular file"
+elif [[ -f "$BIN" && ! -x "$BIN" ]]; then
+  CHMOD_ERR="$(chmod +x "$BIN" 2>&1)" || true
+  if [[ ! -x "$BIN" ]]; then
+    PERMS="$(ls -l "$BIN" 2>/dev/null | cut -c1-10)"
+    if [[ -O "$BIN" ]]; then OWNER="you"; else OWNER="another user"; fi
+    if [[ -n "$CHMOD_ERR" ]]; then
+      WHY="chmod +x failed: ${CHMOD_ERR##*: }"
+      FIX="re-copy the bundle as the user who runs Voyager, into a folder that user owns (or clear the file's lock: chflags nouchg on macOS, chattr -i on Linux)"
+    else
+      WHY="chmod +x succeeded, but the system still refuses to run it (is the bundle on a volume mounted noexec?)"
+      FIX="move the bundle to a disk that allows running programs"
+    fi
+    PROBLEM="bin/${BIN_NAME} is present but not executable (permissions ${PERMS:-unknown}, owned by ${OWNER}). ${WHY}. Fix: ${FIX}"
+  fi
+elif [[ ! -e "$BIN" ]]; then
+  PROBLEM="bin/${BIN_NAME} is missing (this OS/CPU has no bundled build, or the bundle is incomplete)"
 fi
 
-if [[ ! -x "$BIN" ]]; then
+if [[ -n "$PROBLEM" ]]; then
   if command -v syft >/dev/null 2>&1; then
     BIN="$(command -v syft)"
+    echo "WARNING: ${PROBLEM}" >&2
+    echo "WARNING: using 'syft' from PATH instead; its version may differ from the bundled one" >&2
   else
-    echo "ERROR: no bundled binary 'syft-${os}-${arch}' and no 'syft' on PATH" >&2
+    echo "ERROR: ${PROBLEM}" >&2
+    echo "ERROR: no 'syft' on PATH either, so syft cannot run" >&2
     exit 1
   fi
 fi

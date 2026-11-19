@@ -4,7 +4,7 @@ set -euo pipefail
 VERSION="${1:?Usage: prepare-release-voyager.sh <version>}"
 
 # Pinned tool versions bundled into the Voyager instrument.
-SYFT_VERSION="1.57.0"
+SYFT_VERSION="1.57.2"
 TRIVY_VERSION="0.76.2"
 
 # Official sha256 checksums for the pinned versions, taken from each project's release
@@ -12,11 +12,11 @@ TRIVY_VERSION="0.76.2"
 # Bump these together with the versions above — a version bump without new checksums
 # fails fast with "no pinned checksum".
 CHECKSUMS="
-9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704  syft_1.57.0_linux_amd64.tar.gz
-410cbfa0ae0f63246bc0057843760b1de2833cd23919e025e368fd7681308cdb  syft_1.57.0_linux_arm64.tar.gz
-f0e8568a9429ac1c8e4ae9e9c399fede5fcd09e4a7348b47b0532baf1c6500c1  syft_1.57.0_darwin_amd64.tar.gz
-17012a5a110323bb1069e513a8665f1ae445905c56b4e3f9a9df4f95c5bb6161  syft_1.57.0_darwin_arm64.tar.gz
-06e9663e55f7f38ff966710670fbe0763182c621f7ac2f191bcb209a6dfbd969  syft_1.57.0_windows_amd64.zip
+ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b  syft_1.57.2_linux_amd64.tar.gz
+8efe605309c98798e1ee0cffdcf8c05ca26819b4cd44c0b03650f1e963e9bdb6  syft_1.57.2_linux_arm64.tar.gz
+73c6100bc43fbcc1c99aed3428d859c6289c4076be7e296dde7e427324c15908  syft_1.57.2_darwin_amd64.tar.gz
+38afbcc03a9d9afac2d7572432fd2c435e051e03930582ea90f4710ffb515224  syft_1.57.2_darwin_arm64.tar.gz
+0a10e03ffd124c304fd7e7491262dba2e5f68eb12378b106d7525146675b2e3a  syft_1.57.2_windows_amd64.zip
 bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  trivy_0.76.2_Linux-64bit.tar.gz
 ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3  trivy_0.76.2_Linux-ARM64.tar.gz
 e08bb9ea449ecf66c6bfb03cbb8697c503ff33d35fc585c9747e3eaeb7ed4c7b  trivy_0.76.2_macOS-64bit.tar.gz
