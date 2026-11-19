@@ -18,3 +18,7 @@ bin/trivy-*
 .trivy-cache/
 /depminer/
 depminer-voyager.zip
+
+# docs build output and the shared theme (added by the docs workflow)
+site/
+docs/stylesheets/dxworks-theme.css
