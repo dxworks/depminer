@@ -94,3 +94,26 @@ files are still written.
 The wrappers in `bin/` pick the binary matching the host OS/arch and fall back to a
 tool on PATH only when no bundled binary exists (a development convenience — release
 bundles always contain the binaries).
+
+## Summary Artifacts
+
+Depminer extraction writes dependency files and an index at `results/depminer/index.json`.
+
+Use the Python helper to generate Voyager summary artifacts from extracted results:
+
+```bash
+python3 lib/depminer-summary.py results/depminer
+```
+
+On Windows you can use:
+
+```bash
+py -3 lib/depminer-summary.py results/depminer
+```
+
+This command creates:
+
+- `results/depminer/summary.md`
+- `results/depminer/summary.html`
+
+If `results/depminer/index.json` is missing, the script generates missing summary artifacts.
