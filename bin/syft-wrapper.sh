@@ -55,6 +55,8 @@ case "$os" in
   *)      os="linux"  ;;
 esac
 
+# Apple Silicon runs the amd64 build through Rosetta when the bundle has no arm64 one
+if [[ "$os" == "darwin" && "$arch" == "arm64" && ! -e "${HERE}/syft-darwin-arm64" ]]; then arch="amd64"; fi
 BIN_NAME="syft-${os}-${arch}"
 BIN="${HERE}/${BIN_NAME}"
 

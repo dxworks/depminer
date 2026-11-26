@@ -54,14 +54,17 @@ jobs:
           java-version: 21
           distribution: 'temurin'
 
-      # Builds the real Voyager bundle (downloads all 10 binaries and checks each against the new
-      # checksums), then runs both wrappers from it on a small fixture: the new binaries must start
-      # and still find packages offline.
+      # Builds the real Voyager bundle (downloads syft and trivy for every platform of
+      # scripts/voyager-platforms.sh and checks each against the new checksums), splits it into the
+      # per-platform zips the release publishes, then runs both wrappers from the linux-x64 zip on
+      # a small fixture: the new binaries must start and still find packages offline.
       - name: Smoke-test the new binaries
         if: steps.bump.outputs.changed == 'true'
         run: |
           ./mvnw -B -q package -DskipTests
           ./scripts/prepare-release-voyager.sh 0.0.0-check
+          ./scripts/split-voyager-platforms.sh depminer-voyager.zip "$RUNNER_TEMP/platforms"
+          rm -rf depminer && unzip -q "$RUNNER_TEMP/platforms/depminer-voyager-linux-x64.zip"
           fx="$RUNNER_TEMP/target/fixture"; out="$RUNNER_TEMP/out"
           mkdir -p "$fx"
           cat > "$fx/package-lock.json" <<'EOF'
@@ -97,7 +100,7 @@ jobs:
 
             - Newest stable releases at least 7 days old, or newer when that fixes a vulnerability of the pinned version.
             - Checksums taken from each publisher's checksums file after its Sigstore signature verified against the publisher's release workflow.
-            - The Voyager bundle was built with them (every download checked) and both wrappers found packages in a fixture.
+            - The Voyager bundle was built with them (every download checked), split per platform, and both wrappers from the linux-x64 zip found packages in a fixture.
 
             Merges itself when the required checks pass, unless the new version adds a HIGH/CRITICAL finding. Once merged, Scanner Release tags the next patch version (x.y.Z+1) and publishes it.
 

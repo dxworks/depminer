@@ -7,6 +7,8 @@ shopt -s inherit_errexit 2>/dev/null || true   # set -e also inside $(...) (bash
 MIN_AGE_DAYS="${MIN_AGE_DAYS:-7}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREP="$ROOT/scripts/prepare-release-voyager.sh"
+# The bundle's platforms: the checksums below cover exactly the assets prepare-release-voyager.sh downloads
+. "$ROOT/scripts/voyager-platforms.sh"
 DOC="$ROOT/docs/tools.md"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -167,15 +169,15 @@ fi
 
 # Rebuild the whole CHECKSUMS block from verified files, also for an unchanged tool, so the block
 # is always exactly what the publishers signed.
+syft_assets=(); trivy_assets=()
+while read -r platform _ syft_tail trivy_tail; do
+  [ -n "$platform" ] || continue
+  syft_assets+=("syft_${syft_v}_${syft_tail}"); trivy_assets+=("trivy_${trivy_v}_${trivy_tail}")
+done <<< "$VOYAGER_PLATFORMS"
+[ ${#syft_assets[@]} -gt 0 ] || { echo "ERROR: no platforms in voyager-platforms.sh" >&2; exit 1; }
 {
-  verified_lines anchore/syft syft "$syft_v" \
-    "syft_${syft_v}_linux_amd64.tar.gz" "syft_${syft_v}_linux_arm64.tar.gz" \
-    "syft_${syft_v}_darwin_amd64.tar.gz" "syft_${syft_v}_darwin_arm64.tar.gz" \
-    "syft_${syft_v}_windows_amd64.zip"
-  verified_lines aquasecurity/trivy trivy "$trivy_v" \
-    "trivy_${trivy_v}_Linux-64bit.tar.gz" "trivy_${trivy_v}_Linux-ARM64.tar.gz" \
-    "trivy_${trivy_v}_macOS-64bit.tar.gz" "trivy_${trivy_v}_macOS-ARM64.tar.gz" \
-    "trivy_${trivy_v}_windows-64bit.zip"
+  verified_lines anchore/syft syft "$syft_v" "${syft_assets[@]}"
+  verified_lines aquasecurity/trivy trivy "$trivy_v" "${trivy_assets[@]}"
 } > "$WORK/checksums"
 
 awk -v sums="$WORK/checksums" -v syft="$syft_v" -v trivy="$trivy_v" '

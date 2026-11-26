@@ -134,3 +134,29 @@ jobs:
       release-name: Depminer ${{ needs.parse-tag.outputs.semver }} (Voyager)
       asset-name: depminer-voyager.zip
       release-notes-file: releaseNotes/v${{ needs.parse-tag.outputs.semver }}.md
+
+  # One depminer-voyager-<platform>.zip per platform of scripts/voyager-platforms.sh, cut from the
+  # signed all-platform zip, for the per-platform voyager-full-<platform>.zip of the Full Instrument
+  # Release (voyager repo). depminer-voyager.zip keeps every platform, for voyenv files that name it.
+  platform-assets:
+    needs: [parse-tag, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download archive
+        uses: actions/download-artifact@v4
+        with:
+          name: release-archive-signed
+          path: signed
+
+      - name: Split per platform
+        run: ./scripts/split-voyager-platforms.sh signed/depminer-voyager.zip platforms
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "v${{ needs.parse-tag.outputs.semver }}-voyager" platforms/*.zip --clobber

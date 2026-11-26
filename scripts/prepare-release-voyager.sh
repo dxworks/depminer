@@ -3,6 +3,9 @@ set -euo pipefail
 
 VERSION="${1:?Usage: prepare-release-voyager.sh <version>}"
 
+# The platforms and their syft/trivy assets
+. "$(cd "$(dirname "$0")" && pwd)/voyager-platforms.sh"
+
 # Pinned tool versions bundled into the Voyager instrument.
 SYFT_VERSION="1.57.2"
 TRIVY_VERSION="0.76.2"
@@ -82,32 +85,29 @@ cp bin/trivy-wrapper.sh depminer/bin/trivy-wrapper.sh
 cp bin/trivy-wrapper.ps1 depminer/bin/trivy-wrapper.ps1
 chmod +x depminer/bin/*.sh
 
-# --- Syft binaries (single self-contained executable per platform) ---
-sbase="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
-for t in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-  os="${t%_*}"; arch="${t#*_}"
-  fetch_verified "$sbase" "syft_${SYFT_VERSION}_${t}.tar.gz" /tmp/syft.tgz
-  tar -xzf /tmp/syft.tgz -C /tmp syft
-  mv /tmp/syft "depminer/bin/syft-${os}-${arch}"
-  chmod +x "depminer/bin/syft-${os}-${arch}"
-done
-fetch_verified "$sbase" "syft_${SYFT_VERSION}_windows_amd64.zip" /tmp/syft-win.zip
-unzip -o -q /tmp/syft-win.zip syft.exe -d /tmp
-mv /tmp/syft.exe depminer/bin/syft-windows-amd64.exe
+# --- Syft and Trivy binaries: one self-contained executable per tool and platform ---
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 
-# --- Trivy binaries (single self-contained executable per platform) ---
+# Download <base>/<asset>, verify it, and install its <tool> executable as <dest>.
+install_tool() {
+  local base="$1" asset="$2" tool="$3" dest="$4"
+  rm -rf "$WORK/x" && mkdir "$WORK/x"
+  fetch_verified "$base" "$asset" "$WORK/$asset"
+  case "$asset" in
+    *.zip) unzip -o -q "$WORK/$asset" "$tool.exe" -d "$WORK/x"; mv "$WORK/x/$tool.exe" "$dest" ;;
+    *)     tar -xzf "$WORK/$asset" -C "$WORK/x" "$tool"; mv "$WORK/x/$tool" "$dest" ;;
+  esac
+  rm -f "$WORK/$asset"
+  chmod +x "$dest"
+}
+
+sbase="https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}"
 tbase="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
-for spec in "linux amd64 Linux-64bit" "linux arm64 Linux-ARM64" \
-            "darwin amd64 macOS-64bit" "darwin arm64 macOS-ARM64"; do
-  set -- $spec
-  os="$1"; arch="$2"; asset="$3"
-  fetch_verified "$tbase" "trivy_${TRIVY_VERSION}_${asset}.tar.gz" /tmp/trivy.tgz
-  tar -xzf /tmp/trivy.tgz -C /tmp trivy
-  mv /tmp/trivy "depminer/bin/trivy-${os}-${arch}"
-  chmod +x "depminer/bin/trivy-${os}-${arch}"
-done
-fetch_verified "$tbase" "trivy_${TRIVY_VERSION}_windows-64bit.zip" /tmp/trivy-win.zip
-unzip -o -q /tmp/trivy-win.zip trivy.exe -d /tmp
-mv /tmp/trivy.exe depminer/bin/trivy-windows-amd64.exe
+while read -r platform suffix syft_tail trivy_tail; do
+  [ -n "$platform" ] || continue
+  install_tool "$sbase" "syft_${SYFT_VERSION}_${syft_tail}"   syft  "depminer/bin/syft-${suffix}"
+  install_tool "$tbase" "trivy_${TRIVY_VERSION}_${trivy_tail}" trivy "depminer/bin/trivy-${suffix}"
+done <<< "$VOYAGER_PLATFORMS"
 
 zip -r depminer-voyager.zip depminer
